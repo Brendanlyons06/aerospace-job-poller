@@ -1,0 +1,15 @@
+# Secrets and machine-specific configuration
+.env
+*.pem
+
+# Local poller state
+jobs.db
+*.db-journal
+.sms_opt_in_sent
+
+# Python build/runtime artifacts
+__pycache__/
+*.py[cod]
+
+# Browser network captures can contain cookies and transient access tokens.
+*.har
