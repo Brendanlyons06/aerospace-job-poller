@@ -58,8 +58,10 @@ def lever(board_token: str, *, commitment: str | None = None) -> list[dict]:
     """Every open posting on a company's Lever board.
 
     ``commitment`` matches Lever's first-party employment-type category, such
-    as ``"Intern"``.  Use it when a company's official board exposes that
-    filter instead of inferring employment type from a mutable job title.
+    as ``"Intern"``.  Lever's public postings endpoint returns the full
+    board even when the hosted page displays this filter, so select the
+    category from the API record here rather than inferring it from a mutable
+    job title.
     """
     postings = http.get_json(LEVER_URL.format(token=board_token))
     jobs = []
