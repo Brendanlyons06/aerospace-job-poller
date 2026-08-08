@@ -54,12 +54,19 @@ def greenhouse(board_token: str) -> list[dict]:
     return jobs
 
 
-def lever(board_token: str) -> list[dict]:
-    """Every open posting on a company's Lever board."""
+def lever(board_token: str, *, commitment: str | None = None) -> list[dict]:
+    """Every open posting on a company's Lever board.
+
+    ``commitment`` matches Lever's first-party employment-type category, such
+    as ``"Intern"``.  Use it when a company's official board exposes that
+    filter instead of inferring employment type from a mutable job title.
+    """
     postings = http.get_json(LEVER_URL.format(token=board_token))
     jobs = []
     for job in postings:
         categories = job.get("categories") or {}
+        if commitment is not None and categories.get("commitment") != commitment:
+            continue
         # allLocations is the multi-location list; older postings only have
         # the single `location` string.
         locations = categories.get("allLocations")
