@@ -10,9 +10,10 @@ Fetching is concurrent, everything after it is not — see MAX_WORKERS.
 """
 
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from . import db, notify
+from . import db, notify, observability
 from .companies import COMPANIES
 
 # Fetching is I/O-bound, so this is sized by memory, not by CPU. Each
@@ -27,21 +28,43 @@ from .companies import COMPANIES
 MAX_WORKERS = 12
 
 
-def _fetch(company) -> list[dict]:
+def _fetch(company, run_id: str | None = None) -> list[dict]:
     """Fetch + filter one company. Runs on a pool thread; touches no shared state."""
-    jobs = company.fetch_jobs()
-    if hasattr(company, "filter_jobs"):
-        jobs = company.filter_jobs(jobs)
-    return jobs
+    run_id = run_id or uuid.uuid4().hex
+    context = observability.set_context(company.COMPANY_NAME, run_id)
+    started = time.monotonic()
+    try:
+        jobs = company.fetch_jobs()
+        raw_job_count = len(jobs)
+        if hasattr(company, "filter_jobs"):
+            jobs = company.filter_jobs(jobs)
+        observability.log_event(
+            event="fetch_complete",
+            duration_ms=round((time.monotonic() - started) * 1000),
+            raw_job_count=raw_job_count,
+            filtered_job_count=len(jobs),
+        )
+        return jobs
+    except Exception as exc:
+        observability.log_event(
+            event="fetch_failed",
+            duration_ms=round((time.monotonic() - started) * 1000),
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
+        raise
+    finally:
+        observability.reset_context(context)
 
 
 def run() -> None:
     notify.ensure_opted_in()
     started = time.monotonic()
+    run_id = uuid.uuid4().hex
 
     # Fetch concurrently...
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(_fetch, company): company for company in COMPANIES}
+        futures = {pool.submit(_fetch, company, run_id): company for company in COMPANIES}
         results = {}
         failures = []
         for future, company in futures.items():
@@ -58,6 +81,13 @@ def run() -> None:
     # fast enough that there's nothing to win by parallelizing them.
     for company, jobs in results.items():
         new_jobs = db.sync_and_get_new(company.COMPANY_NAME, jobs)
+        observability.log_event(
+            company.COMPANY_NAME,
+            "poll_result",
+            run_id=run_id,
+            job_count=len(jobs),
+            new_job_count=len(new_jobs),
+        )
 
         for job in new_jobs:
             print(f"[{company.COMPANY_NAME}] new: {job['title']} ({', '.join(job['locations'])})")

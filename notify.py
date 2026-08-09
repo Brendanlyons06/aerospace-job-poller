@@ -1,6 +1,6 @@
 """Barebones text + email senders. Reads credentials from .env at project root.
 
-SMS goes through Twilio's REST API directly (plain requests call, no twilio
+SMS goes through Twilio's REST API directly (curl_cffi call, no Twilio
 SDK dependency). Email goes through Gmail SMTP with an app password.
 """
 
@@ -9,8 +9,9 @@ import smtplib
 from email.mime.text import MIMEText
 from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
+
+from . import http
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -39,12 +40,15 @@ def send_text(body: str) -> None:
         raise RuntimeError("Twilio env vars not set (see .env.example)")
 
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-    resp = requests.post(
-        url,
-        auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
-        data={"From": TWILIO_FROM_NUMBER, "To": TWILIO_TO_NUMBER, "Body": body},
-    )
-    resp.raise_for_status()
+    # Twilio POSTs create messages, so retrying after an ambiguous failure
+    # could deliver a duplicate alert.
+    with http.session(retries=0) as session:
+        resp = session.post(
+            url,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            data={"From": TWILIO_FROM_NUMBER, "To": TWILIO_TO_NUMBER, "Body": body},
+        )
+        resp.raise_for_status()
 
 
 def send_email(subject: str, body: str) -> None:

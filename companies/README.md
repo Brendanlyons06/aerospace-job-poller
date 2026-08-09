@@ -36,7 +36,7 @@ companies/<name>/
 ```
 
 Any HTTP in `client.py` goes through `http.session()` (or `http.get_json()`)
-rather than `requests` directly — `watch.py` fetches companies on a thread
+rather than a raw HTTP client — `watch.py` fetches companies on a thread
 pool it cannot interrupt, so a request without a timeout strands a worker
 permanently. `http.session()` supplies one by default.
 

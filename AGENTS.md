@@ -27,8 +27,8 @@ One poller, many company adapters:
   state**, and it must **never write to `jobs.db` or send notifications**
   itself. A failing adapter is caught and logged per-company, so one dead
   site can't take down the other 99.
-- `http.py` is the shared session (`http.session()` / `http.get_json()`).
-  **Always use it instead of `requests` directly** — see "Mistakes to avoid".
+- `http.py` is the shared curl_cffi session (`http.session()` / `http.get_json()`).
+  **Always use it instead of a raw HTTP client** — see "Mistakes to avoid".
 - `ats.py` has ready-made adapters for Greenhouse and Lever, which between
   them cover a large share of company job boards. Check these before
   reverse-engineering anything.
@@ -141,7 +141,7 @@ suddenly breaks, re-capture a fresh HAR rather than guessing at the fix.
   auto-discovery in `companies/__init__.py` handles it.
 - Don't hand-roll a client for a company that's already on Greenhouse or
   Lever — check `ats.py` first.
-- **Don't call `requests` directly — use `http.session()`.** A request with
+- **Don't call an HTTP client directly — use `http.session()`.** A request with
   no timeout hangs its pool thread forever, and a stuck thread can't be
   killed from outside, so one dark career site would permanently consume a
   worker slot. `http.session()` applies a default timeout (plus retries and

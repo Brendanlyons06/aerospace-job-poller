@@ -12,11 +12,20 @@ predicates, or write your own). See README.md for a walkthrough.
 """
 
 import importlib
+import os
 import pkgutil
+
+_disabled = {
+    name.strip().lower()
+    for name in os.environ.get("JOB_POLLER_DISABLED_COMPANIES", "").split(",")
+    if name.strip()
+}
 
 COMPANIES = []
 for _module_info in sorted(pkgutil.iter_modules(__path__), key=lambda m: m.name):
     if not _module_info.ispkg:
+        continue
+    if _module_info.name.lower() in _disabled:
         continue
     _module = importlib.import_module(f"{__name__}.{_module_info.name}")
     assert hasattr(_module, "COMPANY_NAME"), f"companies/{_module_info.name}: missing COMPANY_NAME"

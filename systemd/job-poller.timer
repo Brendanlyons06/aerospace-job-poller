@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the job poller every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=5min
+Unit=job-poller.service
+
+[Install]
+WantedBy=timers.target

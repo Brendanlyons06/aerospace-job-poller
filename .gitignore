@@ -6,8 +6,10 @@
 jobs.db
 *.db-journal
 .sms_opt_in_sent
+logs/
 
 # Python build/runtime artifacts
+.venv/
 __pycache__/
 *.py[cod]
 

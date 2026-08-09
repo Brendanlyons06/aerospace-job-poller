@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll careers sites for new internship postings
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu
+Environment=JOB_POLLER_DISABLED_COMPANIES=metacareers
+ExecStart=/home/ubuntu/Job-poller/.venv/bin/python -m Job-poller.watch

@@ -19,7 +19,7 @@ import json
 import re
 import sys
 
-import requests
+from curl_cffi import requests
 
 from ... import http
 
@@ -71,61 +71,64 @@ def search_jobs(
     teams=None,
     results_per_page=None,
 ):
-    # http.session() rather than requests.Session() so both calls below carry
+    # http.session() rather than a raw curl_cffi session so both calls below carry
     # a timeout — watch.py fetches companies on a thread pool it can't
     # interrupt, so an untimed request here would strand a worker.
     session = http.session()
-    lsd = get_lsd_token(session)
+    try:
+        lsd = get_lsd_token(session)
 
-    variables = {
-        "search_input": {
-            "q": q,
-            "divisions": divisions or [],
-            "offices": offices or [],
-            "roles": roles or [],
-            "leadership_levels": [],
-            "saved_jobs": [],
-            "saved_searches": [],
-            "sub_teams": [],
-            "teams": teams or [],
-            "is_leadership": False,
-            "is_remote_only": False,
-            "sort_by_new": False,
-            "results_per_page": results_per_page,
-        },
-        "viewasUserID": None,
-        "isLoggedIn": False,
-    }
+        variables = {
+            "search_input": {
+                "q": q,
+                "divisions": divisions or [],
+                "offices": offices or [],
+                "roles": roles or [],
+                "leadership_levels": [],
+                "saved_jobs": [],
+                "saved_searches": [],
+                "sub_teams": [],
+                "teams": teams or [],
+                "is_leadership": False,
+                "is_remote_only": False,
+                "sort_by_new": False,
+                "results_per_page": results_per_page,
+            },
+            "viewasUserID": None,
+            "isLoggedIn": False,
+        }
 
-    data = {
-        "av": "0",
-        "__user": "0",
-        "__a": "1",
-        "fb_api_caller_class": "RelayModern",
-        "fb_api_req_friendly_name": "CareersJobSearchResultsV2DataQuery",
-        "server_timestamps": "true",
-        "doc_id": DOC_ID,
-        "variables": json.dumps(variables),
-        "lsd": lsd,
-    }
+        data = {
+            "av": "0",
+            "__user": "0",
+            "__a": "1",
+            "fb_api_caller_class": "RelayModern",
+            "fb_api_req_friendly_name": "CareersJobSearchResultsV2DataQuery",
+            "server_timestamps": "true",
+            "doc_id": DOC_ID,
+            "variables": json.dumps(variables),
+            "lsd": lsd,
+        }
 
-    headers = {
-        "accept": "*/*",
-        "accept-language": "en-US,en;q=0.9",
-        "content-type": "application/x-www-form-urlencoded",
-        "origin": BASE,
-        "referer": JOBSEARCH_URL,
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
-        "user-agent": USER_AGENT,
-        "x-fb-friendly-name": "CareersJobSearchResultsV2DataQuery",
-        "x-fb-lsd": lsd,
-    }
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9",
+            "content-type": "application/x-www-form-urlencoded",
+            "origin": BASE,
+            "referer": JOBSEARCH_URL,
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": USER_AGENT,
+            "x-fb-friendly-name": "CareersJobSearchResultsV2DataQuery",
+            "x-fb-lsd": lsd,
+        }
 
-    resp = session.post(GRAPHQL_URL, headers=headers, data=data)
-    resp.raise_for_status()
-    return resp.json()
+        resp = session.post(GRAPHQL_URL, headers=headers, data=data)
+        resp.raise_for_status()
+        return resp.json()
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":
