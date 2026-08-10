@@ -7,4 +7,4 @@ CAREERS_URL = "https://shield.ai/careers/"
 
 def fetch_jobs() -> list[dict]:
     """Match Shield AI's official Lever ``commitment=Intern`` view."""
-    return lever("shieldai", commitment="Intern")
+    return lever("shieldai", commitment="Intern", country="United States")

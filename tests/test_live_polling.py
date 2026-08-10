@@ -31,8 +31,7 @@ if str(PROJECT_PARENT) not in sys.path:
 PACKAGE = "Job-poller"
 check = importlib.import_module(f"{PACKAGE}.check")
 companies_module = importlib.import_module(f"{PACKAGE}.companies")
-
-INTERNSHIP_TITLE = ("intern", "co-op", "coop", "student researcher")
+filters = importlib.import_module(f"{PACKAGE}.filters")
 
 
 def poll(company):
@@ -63,12 +62,12 @@ class LivePollingTests(unittest.TestCase):
                     filtered_ids = {item["id"] for item in filtered if isinstance(item, dict) and "id" in item}
                     if not filtered_ids.issubset(source_ids):
                         errors.append("filter_jobs() returned a posting that was not fetched")
-                    non_internships = [
+                    non_us = [
                         item["title"] for item in filtered
-                        if not any(token in item["title"].lower() for token in INTERNSHIP_TITLE)
+                        if item.get("locations") and not filters.is_us_job(item)
                     ]
-                    if non_internships:
-                        errors.append(f"non-internship titles after filtering: {non_internships[:3]}")
+                    if non_us:
+                        errors.append(f"non-US locations after filtering: {non_us[:3]}")
                     if errors:
                         failures.append(f"{company.COMPANY_NAME}: {'; '.join(errors)}")
                 except Exception as exc:

@@ -1,7 +1,7 @@
 import re
 
 from ... import http
-from ..feeds import technical_internships
+from ...filters import is_us_location
 
 COMPANY_NAME = "Block"
 CAREERS_URL = "https://block.xyz/careers/jobs"
@@ -19,10 +19,11 @@ def fetch_jobs() -> list[dict]:
             "locations": [location] if location else [],
             "url": CAREERS_URL,
         }
-        for job_id, title, location in re.findall(
-            r'\{id:(\d+).*?title:"([^"]+)".*?location:"([^"]*)"', page, re.S
+        for job_id, title, employee_type, location in re.findall(
+            r'\{id:(\d+).*?title:"([^"]+)".*?employeeType:"([^"]+)"'
+            r'.*?location:"([^"]*)"',
+            page,
+            re.S,
         )
+        if employee_type == "Intern" and is_us_location(location)
     ]
-
-def filter_jobs(jobs: list[dict]) -> list[dict]:
-    return technical_internships(jobs)

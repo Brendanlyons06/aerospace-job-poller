@@ -1,12 +1,10 @@
-from ..feeds import technical_internships, workday_jobs
+from ..feeds import workday_internships_us
 
 COMPANY_NAME = "Salesforce"
 CAREERS_URL = "https://careers.salesforce.com/en/jobs/"
 
 
 def fetch_jobs() -> list[dict]:
-    return workday_jobs("salesforce", "External_Career_Site", host="wd12")
-
-
-def filter_jobs(jobs: list[dict]) -> list[dict]:
-    return technical_internships(jobs)
+    return workday_internships_us(
+        "salesforce", "External_Career_Site", host="wd12"
+    )

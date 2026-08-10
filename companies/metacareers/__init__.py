@@ -8,24 +8,22 @@ add a new one:
     filter_jobs(jobs) -> list[dict]   # optional
 """
 
-from ...filters import us_only_no_phd
+from ...filters import is_us_job
 from . import client
 
 COMPANY_NAME = "Meta"
 
-# Software + AI internships. See client.py for how these map onto the
-# CareersJobSearchResultsV2DataQuery search_input (roles/teams captured
-# live from companies/metacareers/2nd.har).
+# The official search's exact role facet. Country is not represented in the
+# public GraphQL search input, so normalized locations are validated below.
 ROLES = ["Internship"]
-TEAMS = ["Software Engineering", "Artificial Intelligence"]
 
-# Meta posts plenty of non-US and PhD-only roles under the same search —
-# filter those out. Other companies aren't obligated to reuse this.
-filter_jobs = us_only_no_phd
+
+def filter_jobs(jobs: list[dict]) -> list[dict]:
+    return [job for job in jobs if is_us_job(job)]
 
 
 def fetch_jobs() -> list[dict]:
-    result = client.search_jobs(roles=ROLES, teams=TEAMS)
+    result = client.search_jobs(roles=ROLES)
     raw_jobs = result["data"]["job_search_with_featured_jobs_v2"]["all_jobs"]
     return [
         {

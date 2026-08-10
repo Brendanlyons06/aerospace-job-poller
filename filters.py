@@ -7,15 +7,18 @@ can call us_only_no_phd() directly, compose the predicates differently, or
 ignore this module entirely.
 
 A job dict is expected to have at least: {"title": str, "locations": list[str]}.
-Locations come back from career sites as "City, ST" for US postings or
-"City, Country" for everything else (e.g. "Austin, TX" vs "London, UK"), so
-US-ness is decided by checking for a trailing two-letter US state/territory
-code rather than trying to maintain a country blocklist.
+Locations come back in several forms (``Austin, TX``, ``US, California``,
+``Remote - United States``), so the predicates understand both country names
+and state/territory names and abbreviations.
 """
 
 import re
 
 PHD_RE = re.compile(r"\bph\.?\s?d\.?\b", re.IGNORECASE)
+INTERNSHIP_RE = re.compile(
+    r"\b(?:intern(?:ship)?s?|co[\s-]?op(?:erative)?|student researcher)\b",
+    re.IGNORECASE,
+)
 
 US_STATE_CODES = {
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -26,22 +29,59 @@ US_STATE_CODES = {
     "DC", "PR", "VI", "GU",
 }
 
-_US_LOCATION_RE = re.compile(r",\s*([A-Za-z]{2})\s*$")
+US_STATE_NAMES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming", "district of columbia",
+    "puerto rico", "u.s. virgin islands", "guam",
+}
+
+_US_COUNTRY_RE = re.compile(
+    r"(?:\bunited states(?: of america)?\b|"
+    r"(?<![A-Za-z])(?:US|USA|U\.S\.|U\.S\.A\.?)(?![A-Za-z]))",
+    re.IGNORECASE,
+)
+_LOCATION_PART_RE = re.compile(r"\s*(?:,|/|\||;| - )\s*")
 
 
 def is_phd_title(title: str) -> bool:
     return bool(PHD_RE.search(title))
 
 
+def is_internship_title(title: str) -> bool:
+    """Return whether a title explicitly describes an internship/co-op."""
+    return bool(INTERNSHIP_RE.search(title))
+
+
 def is_us_location(location: str) -> bool:
-    match = _US_LOCATION_RE.search(location)
-    if not match:
+    """Recognize the country and region labels used by supported job boards."""
+    if not isinstance(location, str) or not location.strip():
         return False
-    return match.group(1).upper() in US_STATE_CODES
+    if _US_COUNTRY_RE.search(location):
+        return True
+    parts = [part.strip(" ()").lower() for part in _LOCATION_PART_RE.split(location)]
+    if any(part in US_STATE_NAMES for part in parts):
+        return True
+    return any(part.upper() in US_STATE_CODES for part in parts)
 
 
 def is_us_job(job: dict) -> bool:
     return any(is_us_location(loc) for loc in job.get("locations", []))
+
+
+def internships_in_us(jobs: list[dict]) -> list[dict]:
+    """Strict fallback for sites without server-side type/country facets."""
+    return [
+        job for job in jobs
+        if is_internship_title(job.get("title", "")) and is_us_job(job)
+    ]
 
 
 def us_only_no_phd(jobs: list[dict]) -> list[dict]:

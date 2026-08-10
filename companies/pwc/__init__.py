@@ -4,7 +4,7 @@ import html
 import re
 
 from ... import http
-from ..feeds import technical_internships
+from ...filters import is_internship_title
 
 COMPANY_NAME = "PwC"
 CAREERS_URL = "https://jobs.us.pwc.com/search-jobs?k=intern"
@@ -22,7 +22,7 @@ def fetch_jobs() -> list[dict]:
     with http.session() as session:
         response = session.get(CAREERS_URL)
         response.raise_for_status()
-    return [
+    jobs = [
         {
             "id": match.group("id"),
             "title": re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", match.group("title")))).strip(),
@@ -31,7 +31,5 @@ def fetch_jobs() -> list[dict]:
         }
         for match in _JOB.finditer(response.text)
     ]
-
-
-def filter_jobs(jobs: list[dict]) -> list[dict]:
-    return technical_internships(jobs)
+    # The official US board has a keyword filter rather than a job-type facet.
+    return [job for job in jobs if is_internship_title(job["title"])]

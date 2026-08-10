@@ -5,6 +5,7 @@ from html.parser import HTMLParser
 import re
 
 from ... import http
+from ...filters import is_us_job
 
 COMPANY_NAME = "Apple"
 SEARCH_URL = "https://jobs.apple.com/en-us/search"
@@ -67,7 +68,11 @@ def fetch_jobs() -> list[dict]:
         with http.session() as session:
             response = session.get(
                 SEARCH_URL,
-                params={"team": "internships-STDNT-INTRN", "page": page},
+                params={
+                    "team": "internships-STDNT-INTRN",
+                    "location": "united-states-USA",
+                    "page": page,
+                },
             )
         response.raise_for_status()
         page_jobs = []
@@ -78,7 +83,7 @@ def fetch_jobs() -> list[dict]:
         ):
             link = re.search(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', block, re.DOTALL)
             location = re.search(
-                r'id="search-store-name-container-\d+">(.*?)</span>',
+                r'id="search-store-name(?:-container)?-\d+">(.*?)</span>',
                 block,
                 re.DOTALL,
             )
@@ -108,17 +113,5 @@ def fetch_jobs() -> list[dict]:
 
 
 def filter_jobs(jobs: list[dict]) -> list[dict]:
-    """Keep internships relevant to software, ML/AI, or technical research."""
-    keywords = (
-        "software",
-        "machine learning",
-        "artificial intelligence",
-        "research",
-        "computer vision",
-    )
-    return [
-        job
-        for job in jobs
-        if re.search(r"\bintern(?:ship)?s?\b", job["title"], re.IGNORECASE)
-        and any(keyword in job["title"].lower() for keyword in keywords)
-    ]
+    """The request already uses Apple's Internship team; keep U.S. results."""
+    return [job for job in jobs if is_us_job(job)]

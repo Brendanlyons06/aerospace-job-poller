@@ -1,12 +1,8 @@
-from ..feeds import technical_internships, workday_jobs
+from ..feeds import workday_internships_us
 
 COMPANY_NAME = "Intel"
 CAREERS_URL = "https://jobs.intel.com/en/search-jobs/intern"
 
 
 def fetch_jobs() -> list[dict]:
-    return workday_jobs("intel", "External", host="wd1")
-
-
-def filter_jobs(jobs: list[dict]) -> list[dict]:
-    return technical_internships(jobs)
+    return workday_internships_us("intel", "External", host="wd1")

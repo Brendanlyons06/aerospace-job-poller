@@ -1,12 +1,8 @@
-from ..feeds import ashby_jobs, technical_internships
+from ..feeds import ashby_internships_us
 
 COMPANY_NAME = "Sierra"
 CAREERS_URL = "https://jobs.ashbyhq.com/sierra"
 
 
 def fetch_jobs() -> list[dict]:
-    return ashby_jobs("sierra")
-
-
-def filter_jobs(jobs: list[dict]) -> list[dict]:
-    return technical_internships(jobs)
+    return ashby_internships_us("sierra")

@@ -41,6 +41,7 @@ check = importlib.import_module(f"{PACKAGE}.check")
 companies_module = importlib.import_module(f"{PACKAGE}.companies")
 db = importlib.import_module(f"{PACKAGE}.db")
 feeds = importlib.import_module(f"{PACKAGE}.companies.feeds")
+filters = importlib.import_module(f"{PACKAGE}.filters")
 meta_client = importlib.import_module(f"{PACKAGE}.companies.metacareers.client")
 notify = importlib.import_module(f"{PACKAGE}.notify")
 watch = importlib.import_module(f"{PACKAGE}.watch")
@@ -129,6 +130,64 @@ class FeedNormalizationTests(unittest.TestCase):
         self.assertEqual([item["locations"] for item in jobs], [[], ["Remote"]])
         self.assertEqual([item["url"] for item in jobs], ["https://apply/a", "https://job/b"])
 
+    def test_ashby_uses_exact_employment_type_and_structured_country(self) -> None:
+        us_address = {"postalAddress": {"addressCountry": "United States"}}
+        payload = {
+            "jobs": [
+                {
+                    "id": "us",
+                    "title": "Design Intern",
+                    "employmentType": "Intern",
+                    "location": "Toronto",
+                    "address": {"postalAddress": {"addressCountry": "Canada"}},
+                    "secondaryLocations": [{"location": "New York", "address": us_address}],
+                    "jobUrl": "https://job/us",
+                },
+                {
+                    "id": "full",
+                    "title": "Internal Tools Engineer",
+                    "employmentType": "FullTime",
+                    "location": "Austin",
+                    "address": us_address,
+                    "secondaryLocations": [],
+                    "jobUrl": "https://job/full",
+                },
+            ]
+        }
+        with patch.object(feeds.http, "get_json", return_value=payload):
+            self.assertEqual(
+                feeds.ashby_internships_us("example"),
+                [
+                    {
+                        "id": "us",
+                        "title": "Design Intern",
+                        "locations": ["New York"],
+                        "url": "https://job/us",
+                    }
+                ],
+            )
+
+    def test_greenhouse_submits_custom_job_type_and_us_office_filters(self) -> None:
+        base_page = '<script>{"customFields":[{"id":12,"options":[{"id":34,"name":"Internships"}]}]}</script>'
+        result_page = '<script>{"jobPosts":{"data":[{"id":7,"title":"Summer Scholar","location":"Remote","absolute_url":"https://job/7"}],"total_pages":1}}</script>'
+        session = FakeSession(
+            get_responses=[FakeResponse(text=base_page), FakeResponse(text=result_page)]
+        )
+        offices = {
+            "offices": [
+                {"id": 56, "name": "Austin", "location": "Austin, Texas, United States", "parent_id": None}
+            ]
+        }
+        with (
+            patch.object(feeds.http, "session", return_value=session),
+            patch.object(feeds.http, "get_json", return_value=offices),
+        ):
+            jobs = feeds.greenhouse_internships_us("example")
+        self.assertEqual(jobs[0]["locations"], ["Remote, United States"])
+        params = session.get_calls[1][1]["params"]
+        self.assertIn(("field_12[]", 34), params)
+        self.assertIn(("offices[]", 56), params)
+
     def test_amazon_paginates_and_normalizes_relative_urls(self) -> None:
         first = {
             "jobs": [
@@ -164,6 +223,36 @@ class FeedNormalizationTests(unittest.TestCase):
         self.assertEqual(session.post_calls[0][1]["json"]["appliedFacets"], {"type": ["intern"]})
         self.assertEqual(session.post_calls[0][1]["json"]["searchText"], "intern")
         self.assertEqual(session.post_calls[1][1]["json"]["offset"], 20)
+
+    def test_workday_discovers_live_type_and_country_facet_ids(self) -> None:
+        discovery = FakeSession(post_responses=[FakeResponse(payload={"facets": [
+            {"facetParameter": "workerSubType", "descriptor": "Job Type", "values": [
+                {"descriptor": "Regular", "id": "regular"},
+                {"descriptor": "Intern (Fixed Term)", "id": "intern"},
+            ]},
+            {"facetParameter": "locationMainGroup", "values": [
+                {"facetParameter": "locationHierarchy1", "descriptor": "Locations", "values": [
+                    {"descriptor": "Canada", "id": "ca"},
+                    {"descriptor": "United States", "id": "us"},
+                ]}
+            ]},
+        ]})])
+        results = FakeSession(post_responses=[FakeResponse(payload={
+            "total": 1,
+            "jobPostings": [{
+                "bulletFields": ["R1"],
+                "externalPath": "/job/R1",
+                "title": "Product Intern",
+                "locationsText": "US, NY, New York",
+            }],
+        })])
+        with patch.object(feeds.http, "session", side_effect=[discovery, results]):
+            jobs = feeds.workday_internships_us("tenant", "External")
+        self.assertEqual([item["id"] for item in jobs], ["R1"])
+        self.assertEqual(
+            results.post_calls[0][1]["json"]["appliedFacets"],
+            {"workerSubType": ["intern"], "locationHierarchy1": ["us"]},
+        )
 
     def test_official_page_extraction_uses_stable_id_once(self) -> None:
         session = FakeSession(get_responses=[FakeResponse(text="""
@@ -204,6 +293,17 @@ class AtsTests(unittest.TestCase):
         ]
         with patch.object(ats.http, "get_json", return_value=postings):
             self.assertEqual(ats.lever("board", commitment="Intern"), [job("intern", "Software Intern") | {"locations": ["Remote"], "url": "https://job/intern"}])
+
+    def test_lever_can_restrict_exact_intern_commitment_to_us_locations(self) -> None:
+        postings = [
+            {"id": "us", "text": "Design Intern", "hostedUrl": "https://job/us", "categories": {"commitment": "Intern", "allLocations": ["Austin, TX"]}},
+            {"id": "ca", "text": "Design Intern", "hostedUrl": "https://job/ca", "categories": {"commitment": "Intern", "allLocations": ["Toronto, Canada"]}},
+        ]
+        with patch.object(ats.http, "get_json", return_value=postings):
+            self.assertEqual(
+                [item["id"] for item in ats.lever("board", commitment="Intern", country="United States")],
+                ["us"],
+            )
 
 
 class MetaClientTests(unittest.TestCase):
@@ -275,6 +375,18 @@ class AdapterContractTests(unittest.TestCase):
                 job("d", "Machine Learning Co-op"),
             ]),
             [job("a", "Software Engineering Intern"), job("d", "Machine Learning Co-op")],
+        )
+
+    def test_internship_us_fallback_handles_board_location_formats(self) -> None:
+        source = [
+            job("state", "Design Intern") | {"locations": ["Austin, TX"]},
+            job("country", "Finance Co-op") | {"locations": ["Remote - United States"]},
+            job("foreign", "Design Intern") | {"locations": ["Toronto, Canada"]},
+            job("internal", "Internal Tools Engineer") | {"locations": ["Austin, TX"]},
+        ]
+        self.assertEqual(
+            [item["id"] for item in filters.internships_in_us(source)],
+            ["state", "country"],
         )
 
     def test_checker_rejects_duplicate_or_malformed_poll_results(self) -> None:

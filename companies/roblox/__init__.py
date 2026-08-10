@@ -1,6 +1,5 @@
-import re
-
 from ... import http
+from ...filters import is_us_location
 
 COMPANY_NAME = "Roblox"
 
@@ -16,14 +15,6 @@ def fetch_jobs() -> list[dict]:
             "url": f"https://careers.roblox.com/jobs/{job['id']}",
         }
         for job in postings
-    ]
-
-
-def filter_jobs(jobs: list[dict]) -> list[dict]:
-    keywords = ("software", "machine learning", "artificial intelligence", "research")
-    return [
-        job
-        for job in jobs
-        if re.search(r"\bintern(?:ship)?s?\b", job["title"], re.IGNORECASE)
-        and any(keyword in job["title"].lower() for keyword in keywords)
+        if job.get("employment_type") == "Intern"
+        and is_us_location(job.get("location", ""))
     ]

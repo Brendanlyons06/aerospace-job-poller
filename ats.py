@@ -29,6 +29,7 @@ committing the adapter.
 """
 
 from . import http
+from .filters import is_us_location
 
 GREENHOUSE_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
 LEVER_URL = "https://api.lever.co/v0/postings/{token}?mode=json"
@@ -54,14 +55,20 @@ def greenhouse(board_token: str) -> list[dict]:
     return jobs
 
 
-def lever(board_token: str, *, commitment: str | None = None) -> list[dict]:
+def lever(
+    board_token: str,
+    *,
+    commitment: str | None = None,
+    country: str | None = None,
+) -> list[dict]:
     """Every open posting on a company's Lever board.
 
     ``commitment`` matches Lever's first-party employment-type category, such
     as ``"Intern"``.  Lever's public postings endpoint returns the full
     board even when the hosted page displays this filter, so select the
     category from the API record here rather than inferring it from a mutable
-    job title.
+    job title. ``country="United States"`` validates Lever's client-side
+    location category against the normalized posting locations.
     """
     postings = http.get_json(LEVER_URL.format(token=board_token))
     jobs = []
@@ -75,6 +82,10 @@ def lever(board_token: str, *, commitment: str | None = None) -> list[dict]:
         if not locations:
             single = categories.get("location")
             locations = [single] if single else []
+        if country == "United States" and not any(
+            is_us_location(location) for location in locations
+        ):
+            continue
         jobs.append(
             {
                 "id": job["id"],  # Lever uses a stable UUID

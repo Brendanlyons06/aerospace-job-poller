@@ -10,7 +10,18 @@ import json
 import re
 from urllib.parse import unquote, urljoin
 
+from curl_cffi import requests
+
 from .. import http
+from ..filters import internships_in_us, is_internship_title, is_us_location
+
+
+def _embedded_json(page: str, marker: str):
+    """Decode the JSON value immediately following a unique page marker."""
+    start = page.find(marker)
+    if start < 0:
+        raise ValueError(f"could not find {marker!r} in careers page")
+    return json.JSONDecoder().raw_decode(page, start + len(marker))[0]
 
 
 def official_page_jobs(
@@ -93,6 +104,117 @@ def greenhouse_jobs(board: str, *, content: bool = False) -> list[dict]:
     return jobs
 
 
+def _greenhouse_page_jobs(payload: dict) -> list[dict]:
+    jobs = []
+    for job in payload.get("data", []):
+        location = job.get("location")
+        locations = []
+        if isinstance(location, str):
+            locations = [part.strip() for part in location.split(";") if part.strip()]
+        if job.get("id") and job.get("title") and job.get("absolute_url"):
+            jobs.append(
+                {
+                    "id": str(job["id"]),
+                    "title": job["title"],
+                    "locations": locations,
+                    "url": job["absolute_url"],
+                }
+            )
+    return jobs
+
+
+def _greenhouse_us_office_ids(board: str) -> list[int]:
+    """Resolve the live office IDs represented by the hosted Location filter."""
+    payload = http.get_json(
+        f"https://boards-api.greenhouse.io/v1/boards/{board}/offices"
+    )
+    offices = payload.get("offices", [])
+    by_id = {office.get("id"): office for office in offices}
+
+    def is_us_office(office: dict) -> bool:
+        current = office
+        visited = set()
+        while current and current.get("id") not in visited:
+            visited.add(current.get("id"))
+            if is_us_location(current.get("location") or current.get("name") or ""):
+                return True
+            current = by_id.get(current.get("parent_id"))
+        return False
+
+    return [office["id"] for office in offices if office.get("id") and is_us_office(office)]
+
+
+def greenhouse_internships_us(board: str) -> list[dict]:
+    """Use Greenhouse's hosted internship and Location filters when available.
+
+    The modern Greenhouse board submits ``field_<id>[]`` and ``offices[]``
+    query parameters to its own route loader. Boards without an internship
+    custom field expose only keyword search, so those use the site's
+    ``keyword=intern`` request followed by strict title validation. If a
+    company disables the hosted route, the public feed is the documented
+    fallback and both constraints are validated locally.
+    """
+    board_url = f"https://job-boards.greenhouse.io/{board}"
+    try:
+        with http.session() as session:
+            response = session.get(board_url)
+            response.raise_for_status()
+            page = response.text
+
+            custom_fields = _embedded_json(page, '"customFields":')
+            internship_options = []
+            for field in custom_fields:
+                for option in field.get("options", []):
+                    if is_internship_title(option.get("name", "")):
+                        internship_options.append((field.get("id"), option.get("id")))
+
+            params: list[tuple[str, str | int]] = []
+            exact_job_type = bool(internship_options)
+            if exact_job_type:
+                for field_id, option_id in internship_options:
+                    if field_id and option_id:
+                        params.append((f"field_{field_id}[]", option_id))
+            else:
+                params.append(("keyword", "intern"))
+
+            us_office_ids = _greenhouse_us_office_ids(board)
+            params.extend(("offices[]", office_id) for office_id in us_office_ids)
+
+            jobs = []
+            page_number = 1
+            while True:
+                page_params = [*params, ("page", page_number)]
+                response = session.get(board_url, params=page_params)
+                response.raise_for_status()
+                job_posts = _embedded_json(response.text, '"jobPosts":')
+                jobs.extend(_greenhouse_page_jobs(job_posts))
+                if page_number >= int(job_posts.get("total_pages") or 1):
+                    break
+                page_number += 1
+
+        if not exact_job_type:
+            jobs = [job for job in jobs if is_internship_title(job["title"])]
+        if not us_office_ids:
+            jobs = [job for job in jobs if any(is_us_location(loc) for loc in job["locations"])]
+        else:
+            for job in jobs:
+                job["locations"] = [
+                    location
+                    if is_us_location(location)
+                    else f"{location}, United States"
+                    for location in job["locations"]
+                ]
+        return list({job["id"]: job for job in jobs}.values())
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        requests.exceptions.RequestException,
+    ):
+        return internships_in_us(greenhouse_jobs(board, content=True))
+
+
 def workday_jobs(
     tenant: str,
     site: str,
@@ -144,8 +266,113 @@ def workday_jobs(
     return jobs
 
 
+def _workday_facets(facets: list[dict]):
+    """Yield nested Workday facet groups as ``(parameter, values)`` pairs."""
+    for facet in facets:
+        values = facet.get("values") or []
+        if values and all("id" in value for value in values):
+            yield facet.get("facetParameter"), values, facet.get("descriptor")
+        for value in values:
+            if isinstance(value, dict) and value.get("values"):
+                yield from _workday_facets([value])
+
+
+def workday_internships_us(
+    tenant: str,
+    site: str,
+    *,
+    host: str = "wd5",
+) -> list[dict]:
+    """Discover and apply a Workday site's live Job Type and U.S. facets."""
+    endpoint = (
+        f"https://{tenant}.{host}.myworkdayjobs.com/wday/cxs/"
+        f"{tenant}/{site}/jobs"
+    )
+    with http.session() as session:
+        response = session.post(
+            endpoint,
+            json={"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""},
+        )
+        response.raise_for_status()
+        groups = list(_workday_facets(response.json().get("facets", [])))
+
+    applied: dict[str, list[str]] = {}
+    for parameter, values, descriptor in groups:
+        if parameter and (descriptor or "").lower() == "job type":
+            ids = [
+                value["id"] for value in values
+                if is_internship_title(value.get("descriptor", ""))
+            ]
+            if ids:
+                applied[parameter] = ids
+                break
+
+    # Prefer a single country-level facet. If the site only exposes offices,
+    # submit all U.S. office values (OR semantics within a Workday facet).
+    for parameter, values, descriptor in groups:
+        if not parameter:
+            continue
+        exact_country = [
+            value["id"] for value in values
+            if re.fullmatch(
+                r"(?:United States(?: of America)?|US|USA)",
+                value.get("descriptor", ""),
+                re.IGNORECASE,
+            )
+        ]
+        if exact_country:
+            applied[parameter] = exact_country
+            break
+    else:
+        for parameter, values, _descriptor in groups:
+            if not parameter:
+                continue
+            ids = [
+                value["id"] for value in values
+                if is_us_location(value.get("descriptor", ""))
+            ]
+            if ids:
+                applied[parameter] = ids
+                break
+
+    if not applied:
+        return internships_in_us(
+            workday_jobs(tenant, site, host=host, search_text="intern")
+        )
+    jobs = workday_jobs(
+        tenant,
+        site,
+        host=host,
+        search_text="",
+        applied_facets=applied,
+    )
+    # A missing type or country facet is unusual but possible in customized
+    # tenants; enforce only the constraint Workday could not represent.
+    has_type = any(
+        parameter in applied and (descriptor or "").lower() == "job type"
+        for parameter, _values, descriptor in groups
+    )
+    has_country = any(
+        parameter in applied and (descriptor or "").lower() != "job type"
+        for parameter, _values, descriptor in groups
+    )
+    if not has_type:
+        jobs = [job for job in jobs if is_internship_title(job["title"])]
+    if not has_country:
+        jobs = [job for job in jobs if any(is_us_location(loc) for loc in job["locations"])]
+    else:
+        for job in jobs:
+            job["locations"] = [
+                location
+                if is_us_location(location)
+                else f"{location}, United States"
+                for location in job["locations"]
+            ]
+    return jobs
+
+
 def amazon_jobs() -> list[dict]:
-    """Read Amazon's official JSON search feed, restricted to internships."""
+    """Use Amazon's official keyword and country filters for U.S. internships."""
     jobs = []
     offset = 0
     page_size = 100
@@ -154,17 +381,36 @@ def amazon_jobs() -> list[dict]:
             "https://www.amazon.jobs/en/search.json",
             params={
                 "base_query": "intern",
+                "country": "USA",
                 "offset": offset,
                 "result_limit": page_size,
             },
         )
         page = payload.get("jobs", [])
         for job in page:
+            if job.get("country_code") not in {None, "US", "USA"}:
+                continue
+            if not is_internship_title(job.get("title", "")):
+                continue
             locations = job.get("locations")
             if isinstance(locations, str):
                 locations = [locations]
             elif not isinstance(locations, list):
                 locations = []
+            normalized_locations = []
+            for location in locations:
+                try:
+                    data = json.loads(location) if isinstance(location, str) else location
+                except json.JSONDecodeError:
+                    data = None
+                if isinstance(data, dict):
+                    if data.get("countryIso2a") == "US" or data.get("countryIso3a") == "USA":
+                        normalized_locations.append(
+                            data.get("normalizedLocation") or data.get("location")
+                        )
+                elif isinstance(location, str):
+                    normalized_locations.append(location)
+            locations = [location for location in normalized_locations if location]
             if not locations:
                 city = ", ".join(
                     value for value in (job.get("city"), job.get("state")) if value
@@ -267,19 +513,19 @@ def ibm_jobs() -> list[dict]:
         while True:
             response = session.get(
                 endpoint,
-                params={
-                    "scope": "careers2",
-                    "rmdt": "ALL",
-                    "appid": "careers",
-                    "sortby": "pageviews_desc",
-                    "query": "intern",
-                    "lang": "en",
-                    "cc": "us",
-                    "fr": 0,
-                    "nr": 30,
-                    "page": page,
-                    "filter": "field_keyword_18:Internship",
-                },
+                params=[
+                    ("scope", "careers2"),
+                    ("rmdt", "ALL"),
+                    ("appid", "careers"),
+                    ("sortby", "pageviews_desc"),
+                    ("query", "intern"),
+                    ("lang", "en"),
+                    ("fr", 0),
+                    ("nr", 30),
+                    ("page", page),
+                    ("filter", "field_keyword_18:Internship"),
+                    ("filter", 'field_keyword_05:"United States"'),
+                ],
             )
             response.raise_for_status()
             search = response.json().get("resultset", {}).get("searchresults", {})
@@ -301,6 +547,10 @@ def ibm_jobs() -> list[dict]:
                     continue
                 seen.add(str(job_id))
                 location = attributes.get("field_keyword_19")
+                if attributes.get("field_keyword_05") != "United States":
+                    continue
+                if location and not is_us_location(location):
+                    location = f"{location}, United States"
                 jobs.append(
                     {
                         "id": str(job_id),
@@ -319,7 +569,7 @@ def ibm_jobs() -> list[dict]:
 
 
 def palantir_jobs() -> list[dict]:
-    """Read Palantir's own careers-page postings API."""
+    """Read Palantir's own API using its exact Lever employment category."""
     endpoint = "https://www.palantir.com/api/lever/v1/postings?state=published"
     jobs = []
     seen = set()
@@ -336,20 +586,22 @@ def palantir_jobs() -> list[dict]:
                     continue
                 seen.add(job_id)
                 categories = posting.get("categories") or {}
+                if categories.get("commitment") != "Intern":
+                    continue
                 location = categories.get("location")
                 locations = categories.get("allLocations") or (
                     [location] if location else []
                 )
                 urls = posting.get("urls") or {}
                 url = urls.get("show") or "https://www.palantir.com/careers/open-positions/"
-                jobs.append(
-                    {
-                        "id": str(job_id),
-                        "title": posting.get("text", ""),
-                        "locations": locations,
-                        "url": url,
-                    }
-                )
+                normalized = {
+                    "id": str(job_id),
+                    "title": posting.get("text", ""),
+                    "locations": locations,
+                    "url": url,
+                }
+                if any(is_us_location(item) for item in locations):
+                    jobs.append(normalized)
             if not payload.get("hasNext") or not payload.get("next"):
                 break
             cursor = payload["next"]
@@ -358,7 +610,10 @@ def palantir_jobs() -> list[dict]:
 
 def google_jobs() -> list[dict]:
     """Read the result records embedded in Google Careers' official search page."""
-    url = "https://www.google.com/about/careers/applications/jobs/results/?q=intern"
+    url = (
+        "https://www.google.com/about/careers/applications/jobs/results/"
+        "?q=intern&location=United%20States"
+    )
     with http.session() as session:
         response = session.get(url)
         response.raise_for_status()
@@ -392,7 +647,7 @@ def google_jobs() -> list[dict]:
                 "url": detail_links.get(row[1], row[2]),
             }
         )
-    return jobs
+    return internships_in_us(jobs)
 
 
 def google_technical_internships(jobs: list[dict]) -> list[dict]:
@@ -403,6 +658,11 @@ def google_technical_internships(jobs: list[dict]) -> list[dict]:
         if "student researcher" in job["title"].lower()
         or technical_internships([job])
     ]
+
+
+def phenom_internships_us(careers_url: str) -> list[dict]:
+    """Use Phenom's official internship search, validating its country field."""
+    return internships_in_us(phenom_jobs(careers_url))
 
 
 def phenom_jobs(careers_url: str) -> list[dict]:
@@ -476,6 +736,56 @@ def ashby_jobs(board: str) -> list[dict]:
                 "id": str(job["id"]),
                 "title": job["title"],
                 "locations": locations,
+                "url": job.get("jobUrl") or job.get("applyUrl"),
+            }
+        )
+    return jobs
+
+
+def _ashby_location_is_us(location: dict) -> bool:
+    address = (location.get("address") or {}).get("postalAddress") or {}
+    country = address.get("addressCountry")
+    return country in {"US", "USA", "United States", "United States of America"}
+
+
+def ashby_internships_us(board: str) -> list[dict]:
+    """Mirror Ashby's UI filters using its exact structured posting fields.
+
+    Ashby's public job-board UI filters the downloaded payload in the browser;
+    the posting API does not accept filter parameters. ``employmentType`` and
+    the structured primary/secondary country values are the same fields the
+    first-party UI uses, and avoid guessing from title or free-form location.
+    """
+    payload = http.get_json(f"https://api.ashbyhq.com/posting-api/job-board/{board}")
+    jobs = []
+    for job in payload.get("jobs", []):
+        if job.get("employmentType") != "Intern":
+            continue
+        raw_locations = []
+        primary = {
+            "name": job.get("location"),
+            "address": job.get("address"),
+        }
+        raw_locations.append(primary)
+        raw_locations.extend(job.get("secondaryLocations") or [])
+        us_locations = [
+            location.get("name") or location.get("location")
+            for location in raw_locations
+            if isinstance(location, dict)
+            and _ashby_location_is_us(location)
+            and (location.get("name") or location.get("location"))
+        ]
+        if not us_locations:
+            continue
+        us_locations = [
+            location if is_us_location(location) else f"{location}, United States"
+            for location in us_locations
+        ]
+        jobs.append(
+            {
+                "id": str(job["id"]),
+                "title": job["title"],
+                "locations": list(dict.fromkeys(us_locations)),
                 "url": job.get("jobUrl") or job.get("applyUrl"),
             }
         )
