@@ -6,6 +6,7 @@ SDK dependency). Email goes through Gmail SMTP with an app password.
 
 import os
 import smtplib
+from email.utils import getaddresses
 from email.mime.text import MIMEText
 from pathlib import Path
 
@@ -59,11 +60,12 @@ def send_email(subject: str, body: str) -> None:
     msg["Subject"] = subject
     msg["From"] = SMTP_USER
     msg["To"] = EMAIL_TO
+    recipients = [address for _, address in getaddresses([EMAIL_TO])]
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
         server.starttls()
         server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(msg)
+        server.send_message(msg, to_addrs=recipients)
 
 
 def ensure_opted_in() -> None:
