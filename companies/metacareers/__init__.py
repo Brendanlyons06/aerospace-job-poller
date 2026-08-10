@@ -8,7 +8,7 @@ add a new one:
     filter_jobs(jobs) -> list[dict]   # optional
 """
 
-from ...filters import is_us_job
+from ...filters import is_swe_ml_title, is_us_job
 from . import client
 
 COMPANY_NAME = "Meta"
@@ -19,7 +19,7 @@ ROLES = ["Internship"]
 
 
 def filter_jobs(jobs: list[dict]) -> list[dict]:
-    return [job for job in jobs if is_us_job(job)]
+    return [job for job in jobs if is_us_job(job) and is_swe_ml_title(job["title"])]
 
 
 def fetch_jobs() -> list[dict]:

@@ -1,7 +1,7 @@
 import re
 
 from ... import http
-from ...filters import is_us_location
+from ...filters import is_us_location, swe_ml_jobs
 
 COMPANY_NAME = "Block"
 CAREERS_URL = "https://block.xyz/careers/jobs"
@@ -12,7 +12,7 @@ def fetch_jobs() -> list[dict]:
         response = session.get(CAREERS_URL)
         response.raise_for_status()
         page = response.text
-    return [
+    jobs = [
         {
             "id": job_id,
             "title": title.strip(),
@@ -27,3 +27,4 @@ def fetch_jobs() -> list[dict]:
         )
         if employee_type == "Intern" and is_us_location(location)
     ]
+    return swe_ml_jobs(jobs)

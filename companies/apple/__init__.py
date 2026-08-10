@@ -5,7 +5,7 @@ from html.parser import HTMLParser
 import re
 
 from ... import http
-from ...filters import is_us_job
+from ...filters import is_swe_ml_title, is_us_job
 
 COMPANY_NAME = "Apple"
 SEARCH_URL = "https://jobs.apple.com/en-us/search"
@@ -113,5 +113,5 @@ def fetch_jobs() -> list[dict]:
 
 
 def filter_jobs(jobs: list[dict]) -> list[dict]:
-    """The request already uses Apple's Internship team; keep U.S. results."""
-    return [job for job in jobs if is_us_job(job)]
+    """The request uses Apple's Internship team; keep U.S. SWE/ML results."""
+    return [job for job in jobs if is_us_job(job) and is_swe_ml_title(job["title"])]

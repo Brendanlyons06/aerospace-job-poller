@@ -19,6 +19,19 @@ INTERNSHIP_RE = re.compile(
     r"\b(?:intern(?:ship)?s?|co[\s-]?op(?:erative)?|student researcher)\b",
     re.IGNORECASE,
 )
+SWE_ML_RE = re.compile(
+    r"(?:"
+    r"\bsoftware(?:[\s-]+development)?[\s-]+(?:engineer(?:ing)?|developer)\b|"
+    r"\bsoftware(?=[\s-]+(?:intern(?:ship)?s?|co[\s-]?op))\b|"
+    r"\b(?:swe|sde)\b|"
+    r"\bmachine[\s-]+learning\b|"
+    r"\bml\b|"
+    r"\bai\s*[/&+-]\s*ml\b|"
+    r"\bartificial[\s-]+intelligence\b|"
+    r"\bai(?=[\s-]+(?:engineer(?:ing)?|research|intern(?:ship)?s?|co[\s-]?op))\b"
+    r")",
+    re.IGNORECASE,
+)
 
 US_STATE_CODES = {
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -60,6 +73,16 @@ def is_internship_title(title: str) -> bool:
     return bool(INTERNSHIP_RE.search(title))
 
 
+def is_swe_ml_title(title: str) -> bool:
+    """Return whether a title is specifically in software or ML/AI work.
+
+    Generic engineering, data, research, product, and hardware titles are
+    deliberately excluded. The poller is intended to alert only for software
+    engineering and machine-learning internships, not every technical role.
+    """
+    return isinstance(title, str) and bool(SWE_ML_RE.search(title))
+
+
 def is_us_location(location: str) -> bool:
     """Recognize the country and region labels used by supported job boards."""
     if not isinstance(location, str) or not location.strip():
@@ -77,11 +100,18 @@ def is_us_job(job: dict) -> bool:
 
 
 def internships_in_us(jobs: list[dict]) -> list[dict]:
-    """Strict fallback for sites without server-side type/country facets."""
+    """Strict title/location fallback for the target internship search."""
     return [
         job for job in jobs
-        if is_internship_title(job.get("title", "")) and is_us_job(job)
+        if is_internship_title(job.get("title", ""))
+        and is_swe_ml_title(job.get("title", ""))
+        and is_us_job(job)
     ]
+
+
+def swe_ml_jobs(jobs: list[dict]) -> list[dict]:
+    """Keep target-role jobs when type and country were proven structurally."""
+    return [job for job in jobs if is_swe_ml_title(job.get("title", ""))]
 
 
 def us_only_no_phd(jobs: list[dict]) -> list[dict]:

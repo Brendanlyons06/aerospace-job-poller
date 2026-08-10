@@ -68,6 +68,14 @@ class LivePollingTests(unittest.TestCase):
                     ]
                     if non_us:
                         errors.append(f"non-US locations after filtering: {non_us[:3]}")
+                    non_target_roles = [
+                        item["title"] for item in filtered
+                        if not filters.is_swe_ml_title(item.get("title", ""))
+                    ]
+                    if non_target_roles:
+                        errors.append(
+                            f"non-SWE/ML titles after filtering: {non_target_roles[:3]}"
+                        )
                     if errors:
                         failures.append(f"{company.COMPANY_NAME}: {'; '.join(errors)}")
                 except Exception as exc:

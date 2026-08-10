@@ -1,7 +1,7 @@
 import json
 
 from ... import http
-from ...filters import is_us_location
+from ...filters import is_us_location, swe_ml_jobs
 
 COMPANY_NAME = "Stripe"
 CAREERS_URL = "https://stripe.com/careers/search"
@@ -45,4 +45,4 @@ def fetch_jobs() -> list[dict]:
                 "url": f"https://stripe.com/careers/listing/{job['slug']}/{job_id}",
             }
         )
-    return jobs
+    return swe_ml_jobs(jobs)

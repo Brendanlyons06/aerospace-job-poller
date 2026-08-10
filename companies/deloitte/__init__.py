@@ -3,6 +3,7 @@
 from xml.etree import ElementTree
 
 from ... import http
+from ...filters import swe_ml_jobs
 
 COMPANY_NAME = "Deloitte"
 CAREERS_URL = "https://apply.deloitte.com/en_US/careers/SearchJobs?3_5_3=478&sort=relevancy"
@@ -27,4 +28,4 @@ def fetch_jobs() -> list[dict]:
             continue
         job_id = url.rstrip("/").rsplit("/", 1)[-1]
         jobs.append({"id": job_id, "title": title, "locations": [], "url": url})
-    return jobs
+    return swe_ml_jobs(jobs)

@@ -136,12 +136,21 @@ class FeedNormalizationTests(unittest.TestCase):
             "jobs": [
                 {
                     "id": "us",
-                    "title": "Design Intern",
+                    "title": "Machine Learning Intern",
                     "employmentType": "Intern",
                     "location": "Toronto",
                     "address": {"postalAddress": {"addressCountry": "Canada"}},
                     "secondaryLocations": [{"location": "New York", "address": us_address}],
                     "jobUrl": "https://job/us",
+                },
+                {
+                    "id": "design",
+                    "title": "Design Intern",
+                    "employmentType": "Intern",
+                    "location": "Austin",
+                    "address": us_address,
+                    "secondaryLocations": [],
+                    "jobUrl": "https://job/design",
                 },
                 {
                     "id": "full",
@@ -160,7 +169,7 @@ class FeedNormalizationTests(unittest.TestCase):
                 [
                     {
                         "id": "us",
-                        "title": "Design Intern",
+                        "title": "Machine Learning Intern",
                         "locations": ["New York"],
                         "url": "https://job/us",
                     }
@@ -169,7 +178,7 @@ class FeedNormalizationTests(unittest.TestCase):
 
     def test_greenhouse_submits_custom_job_type_and_us_office_filters(self) -> None:
         base_page = '<script>{"customFields":[{"id":12,"options":[{"id":34,"name":"Internships"}]}]}</script>'
-        result_page = '<script>{"jobPosts":{"data":[{"id":7,"title":"Summer Scholar","location":"Remote","absolute_url":"https://job/7"}],"total_pages":1}}</script>'
+        result_page = '<script>{"jobPosts":{"data":[{"id":7,"title":"Software Engineering Summer Scholar","location":"Remote","absolute_url":"https://job/7"},{"id":8,"title":"Product Summer Scholar","location":"Remote","absolute_url":"https://job/8"}],"total_pages":1}}</script>'
         session = FakeSession(
             get_responses=[FakeResponse(text=base_page), FakeResponse(text=result_page)]
         )
@@ -183,6 +192,7 @@ class FeedNormalizationTests(unittest.TestCase):
             patch.object(feeds.http, "get_json", return_value=offices),
         ):
             jobs = feeds.greenhouse_internships_us("example")
+        self.assertEqual([item["id"] for item in jobs], ["7"])
         self.assertEqual(jobs[0]["locations"], ["Remote, United States"])
         params = session.get_calls[1][1]["params"]
         self.assertIn(("field_12[]", 34), params)
@@ -238,13 +248,21 @@ class FeedNormalizationTests(unittest.TestCase):
             ]},
         ]})])
         results = FakeSession(post_responses=[FakeResponse(payload={
-            "total": 1,
-            "jobPostings": [{
-                "bulletFields": ["R1"],
-                "externalPath": "/job/R1",
-                "title": "Product Intern",
-                "locationsText": "US, NY, New York",
-            }],
+            "total": 2,
+            "jobPostings": [
+                {
+                    "bulletFields": ["R1"],
+                    "externalPath": "/job/R1",
+                    "title": "ML Engineering Intern",
+                    "locationsText": "US, NY, New York",
+                },
+                {
+                    "bulletFields": ["R2"],
+                    "externalPath": "/job/R2",
+                    "title": "Product Intern",
+                    "locationsText": "US, NY, New York",
+                },
+            ],
         })])
         with patch.object(feeds.http, "session", side_effect=[discovery, results]):
             jobs = feeds.workday_internships_us("tenant", "External")
@@ -373,15 +391,54 @@ class AdapterContractTests(unittest.TestCase):
                 job("b", "Sales Intern"),
                 job("c", "Software Engineer"),
                 job("d", "Machine Learning Co-op"),
+                job("e", "Hardware Engineering Intern"),
+                job("f", "Data Science Intern"),
+                job("g", "Research Intern"),
             ]),
             [job("a", "Software Engineering Intern"), job("d", "Machine Learning Co-op")],
         )
 
+    def test_swe_ml_title_classifier_covers_real_title_variants(self) -> None:
+        accepted = [
+            "Software Engineering Intern",
+            "Software Engineer Co-op",
+            "Software Development Engineer Internship",
+            "Software Developer Intern",
+            "Software Intern",
+            "SWE Intern",
+            "SDE Co-op",
+            "Machine-Learning Intern",
+            "ML Engineering Intern",
+            "AI/ML Research Intern",
+            "Artificial Intelligence Internship",
+            "AI Engineer Co-op",
+            "Student Researcher, Machine Learning",
+        ]
+        rejected = [
+            "Design Intern",
+            "Finance Co-op",
+            "Sales Intern",
+            "Product Management Intern",
+            "Hardware Engineering Intern",
+            "Mechanical Engineering Intern",
+            "Data Science Intern",
+            "Data Engineering Intern",
+            "Research Intern",
+            "Internal Tools Engineer",
+        ]
+        for title in accepted:
+            with self.subTest(title=title):
+                self.assertTrue(filters.is_swe_ml_title(title))
+        for title in rejected:
+            with self.subTest(title=title):
+                self.assertFalse(filters.is_swe_ml_title(title))
+
     def test_internship_us_fallback_handles_board_location_formats(self) -> None:
         source = [
-            job("state", "Design Intern") | {"locations": ["Austin, TX"]},
-            job("country", "Finance Co-op") | {"locations": ["Remote - United States"]},
-            job("foreign", "Design Intern") | {"locations": ["Toronto, Canada"]},
+            job("state", "Software Engineering Intern") | {"locations": ["Austin, TX"]},
+            job("country", "ML Co-op") | {"locations": ["Remote - United States"]},
+            job("foreign", "SWE Intern") | {"locations": ["Toronto, Canada"]},
+            job("design", "Design Intern") | {"locations": ["Austin, TX"]},
             job("internal", "Internal Tools Engineer") | {"locations": ["Austin, TX"]},
         ]
         self.assertEqual(

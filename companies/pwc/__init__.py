@@ -4,7 +4,7 @@ import html
 import re
 
 from ... import http
-from ...filters import is_internship_title
+from ..feeds import technical_internships
 
 COMPANY_NAME = "PwC"
 CAREERS_URL = "https://jobs.us.pwc.com/search-jobs?k=intern"
@@ -32,4 +32,4 @@ def fetch_jobs() -> list[dict]:
         for match in _JOB.finditer(response.text)
     ]
     # The official US board has a keyword filter rather than a job-type facet.
-    return [job for job in jobs if is_internship_title(job["title"])]
+    return technical_internships(jobs)

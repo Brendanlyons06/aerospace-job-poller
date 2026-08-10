@@ -1,7 +1,7 @@
 import json
 
 from ... import http
-from ...filters import is_us_location
+from ...filters import is_us_location, swe_ml_jobs
 
 COMPANY_NAME = "Snap Inc."
 CAREERS_URL = "https://careers.snap.com/jobs"
@@ -42,4 +42,4 @@ def fetch_jobs() -> list[dict]:
                 "url": job.get("absolute_url") or f"{CAREERS_URL}/job?id={job['id']}",
             }
         )
-    return jobs
+    return swe_ml_jobs(jobs)

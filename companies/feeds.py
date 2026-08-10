@@ -13,7 +13,13 @@ from urllib.parse import unquote, urljoin
 from curl_cffi import requests
 
 from .. import http
-from ..filters import internships_in_us, is_internship_title, is_us_location
+from ..filters import (
+    internships_in_us,
+    is_internship_title,
+    is_swe_ml_title,
+    is_us_location,
+    swe_ml_jobs,
+)
 
 
 def _embedded_json(page: str, marker: str):
@@ -204,7 +210,7 @@ def greenhouse_internships_us(board: str) -> list[dict]:
                     else f"{location}, United States"
                     for location in job["locations"]
                 ]
-        return list({job["id"]: job for job in jobs}.values())
+        return swe_ml_jobs(list({job["id"]: job for job in jobs}.values()))
     except (
         KeyError,
         TypeError,
@@ -368,7 +374,7 @@ def workday_internships_us(
                 else f"{location}, United States"
                 for location in job["locations"]
             ]
-    return jobs
+    return swe_ml_jobs(jobs)
 
 
 def amazon_jobs() -> list[dict]:
@@ -433,7 +439,7 @@ def amazon_jobs() -> list[dict]:
         offset += len(page)
         if not page or len(page) < page_size:
             break
-    return jobs
+    return swe_ml_jobs(jobs)
 
 
 def databricks_jobs() -> list[dict]:
@@ -565,7 +571,7 @@ def ibm_jobs() -> list[dict]:
             if not results or page >= (total + max(returned, 1) - 1) // max(returned, 1):
                 break
             page += 1
-    return jobs
+    return swe_ml_jobs(jobs)
 
 
 def palantir_jobs() -> list[dict]:
@@ -605,7 +611,7 @@ def palantir_jobs() -> list[dict]:
             if not payload.get("hasNext") or not payload.get("next"):
                 break
             cursor = payload["next"]
-    return jobs
+    return swe_ml_jobs(jobs)
 
 
 def google_jobs() -> list[dict]:
@@ -651,12 +657,15 @@ def google_jobs() -> list[dict]:
 
 
 def google_technical_internships(jobs: list[dict]) -> list[dict]:
-    """Google's Student Researcher postings are internship-style technical roles."""
+    """Keep Google's software and ML internship-style postings."""
     return [
         job
         for job in jobs
-        if "student researcher" in job["title"].lower()
-        or technical_internships([job])
+        if is_swe_ml_title(job["title"])
+        and (
+            is_internship_title(job["title"])
+            or "student researcher" in job["title"].lower()
+        )
     ]
 
 
@@ -789,24 +798,14 @@ def ashby_internships_us(board: str) -> list[dict]:
                 "url": job.get("jobUrl") or job.get("applyUrl"),
             }
         )
-    return jobs
+    return swe_ml_jobs(jobs)
 
 
 def technical_internships(jobs: list[dict]) -> list[dict]:
-    """Keep internship/co-op postings in software, ML, AI, or research."""
-    import re
-
-    technical = (
-        "software", "engineering", "machine learning", "artificial intelligence",
-        "research", "data science", "data engineer", "developer", "robotics",
-    )
-    internship = re.compile(r"\b(intern|internship|co-op|coop)\b", re.IGNORECASE)
+    """Keep title-identified software and ML internships/co-ops."""
     return [
         job
         for job in jobs
-        if internship.search(job["title"])
-        and (
-            any(term in job["title"].lower() for term in technical)
-            or re.search(r"\bai\b|\bml\b", job["title"], re.IGNORECASE)
-        )
+        if is_internship_title(job["title"])
+        and is_swe_ml_title(job["title"])
     ]
