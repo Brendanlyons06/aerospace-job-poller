@@ -1,0 +1,12 @@
+from ..feeds import greenhouse_jobs, technical_internships
+
+COMPANY_NAME = "Coursera"
+CAREERS_URL = "https://job-boards.greenhouse.io/coursera"
+
+
+def fetch_jobs() -> list[dict]:
+    return greenhouse_jobs("coursera")
+
+
+def filter_jobs(jobs: list[dict]) -> list[dict]:
+    return technical_internships(jobs)
