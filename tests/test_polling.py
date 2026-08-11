@@ -44,6 +44,8 @@ feeds = importlib.import_module(f"{PACKAGE}.companies.feeds")
 filters = importlib.import_module(f"{PACKAGE}.filters")
 meta_client = importlib.import_module(f"{PACKAGE}.companies.metacareers.client")
 notify = importlib.import_module(f"{PACKAGE}.notify")
+rippling = importlib.import_module(f"{PACKAGE}.companies.rippling")
+rippling_client = importlib.import_module(f"{PACKAGE}.companies.rippling.client")
 watch = importlib.import_module(f"{PACKAGE}.watch")
 
 
@@ -91,6 +93,80 @@ class FakeSession:
 
 
 class FeedNormalizationTests(unittest.TestCase):
+    def test_rippling_reads_live_search_config_and_paginates(self) -> None:
+        next_data = {
+            "props": {
+                "pageProps": {"data": {"algoliaIndexName": "careers_index"}}
+            }
+        }
+        careers_page = (
+            '<script id="__NEXT_DATA__" type="application/json">'
+            f"{json.dumps(next_data)}"
+            "</script>"
+            '<script src="/_next/static/chunks/pages/_app-build.js"></script>'
+        )
+        app_script = (
+            'x.env.ALGOLIA_ENV;let u="APPID";'
+            'x.env.ALGOLIA_ADMIN_API_KEY;let s="public-key"'
+        )
+        session = FakeSession(
+            get_responses=[
+                FakeResponse(text=careers_page),
+                FakeResponse(text=app_script),
+            ],
+            post_responses=[
+                FakeResponse(payload={"results": [{"hits": [{"jobId": "a"}], "nbPages": 2}]}),
+                FakeResponse(payload={"results": [{"hits": [{"jobId": "b"}], "nbPages": 2}]}),
+            ],
+        )
+        with patch.object(rippling_client.http, "session", return_value=session):
+            self.assertEqual(
+                rippling_client.fetch_job_hits(),
+                [{"jobId": "a"}, {"jobId": "b"}],
+            )
+
+        self.assertEqual(len(session.post_calls), 2)
+        first_url, first_kwargs = session.post_calls[0]
+        self.assertEqual(
+            first_url,
+            "https://APPID-dsn.algolia.net/1/indexes/*/queries",
+        )
+        self.assertEqual(first_kwargs["headers"]["X-Algolia-API-Key"], "public-key")
+        self.assertIn("page=0", first_kwargs["json"]["requests"][0]["params"])
+        self.assertIn(
+            "page=1",
+            session.post_calls[1][1]["json"]["requests"][0]["params"],
+        )
+
+    def test_rippling_merges_us_locations_by_stable_job_id(self) -> None:
+        def hit(job_id, title, location, country="US"):
+            return {
+                "jobId": job_id,
+                "name": title,
+                "locations": [{"name": location, "countryCode": country}],
+                "url": f"https://ats.rippling.com/rippling/jobs/{job_id}",
+            }
+
+        payload = [
+            hit("swe", "Software Engineer Intern", "Seattle, WA"),
+            hit("swe", "Software Engineer Intern", "San Francisco, CA"),
+            hit("foreign", "Machine Learning Intern", "Toronto, Canada", "CA"),
+            hit("sales", "Sales Intern", "New York, NY"),
+            hit("false-match", "International Program Manager", "New York, NY"),
+        ]
+        with patch.object(rippling.client, "fetch_job_hits", return_value=payload):
+            self.assertEqual(
+                rippling.fetch_jobs(),
+                [
+                    {
+                        "id": "swe",
+                        "title": "Software Engineer Intern",
+                        "locations": ["Seattle, WA", "San Francisco, CA"],
+                        "url": "https://ats.rippling.com/rippling/jobs/swe",
+                    }
+                ],
+            )
+
     def test_greenhouse_normalizes_metadata_and_deduplicates_locations(self) -> None:
         payload = {
             "jobs": [
