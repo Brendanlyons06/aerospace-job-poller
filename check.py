@@ -21,8 +21,14 @@ Exits nonzero if any company fails, so it can gate a commit.
 
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from .companies import COMPANIES
+
+# Same sizing rationale as watch.MAX_WORKERS — fetches are I/O-bound and the
+# pool is only as safe as the adapters are thread-free, which the contract
+# already requires.
+MAX_WORKERS = 12
 
 REQUIRED = {"id": str, "title": str, "locations": list, "url": str}
 
@@ -69,14 +75,18 @@ def _validate(jobs, label: str) -> list[str]:
     return errors
 
 
-def check(company, twice: bool = False) -> bool:
+def _check_report(company, twice: bool = False) -> tuple[bool, str]:
+    """Run one company's checks; return (passed, printable report block).
+
+    Builds the whole report as a string instead of printing so multiple
+    companies can run on a thread pool without interleaving their lines.
+    """
     name = f"{company.COMPANY_NAME} ({_module_name(company)})"
     started = time.monotonic()
     try:
         jobs = company.fetch_jobs()
     except Exception as exc:
-        print(f"FAIL {name}: fetch_jobs() raised {type(exc).__name__}: {exc}")
-        return False
+        return False, f"FAIL {name}: fetch_jobs() raised {type(exc).__name__}: {exc}"
     elapsed = time.monotonic() - started
 
     errors = _validate(jobs, "fetch_jobs()")
@@ -86,8 +96,7 @@ def check(company, twice: bool = False) -> bool:
         try:
             filtered = company.filter_jobs(jobs)
         except Exception as exc:
-            print(f"FAIL {name}: filter_jobs() raised {type(exc).__name__}: {exc}")
-            return False
+            return False, f"FAIL {name}: filter_jobs() raised {type(exc).__name__}: {exc}"
         errors += _validate(filtered, "filter_jobs()")
         if isinstance(filtered, list) and len(filtered) > len(jobs):
             errors.append("filter_jobs() returned more jobs than it was given")
@@ -96,8 +105,7 @@ def check(company, twice: bool = False) -> bool:
         try:
             again = {job["id"] for job in company.fetch_jobs()}
         except Exception as exc:
-            print(f"FAIL {name}: second fetch_jobs() raised {type(exc).__name__}: {exc}")
-            return False
+            return False, f"FAIL {name}: second fetch_jobs() raised {type(exc).__name__}: {exc}"
         unstable = {job["id"] for job in jobs} ^ again
         if unstable:
             errors.append(
@@ -106,22 +114,26 @@ def check(company, twice: bool = False) -> bool:
             )
 
     if errors:
-        print(f"FAIL {name}")
-        for error in errors:
-            print(f"  - {error}")
-        return False
+        lines = [f"FAIL {name}"]
+        lines.extend(f"  - {error}" for error in errors)
+        return False, "\n".join(lines)
 
     if not jobs:
         # Not a contract violation, but almost always a wrong search filter.
-        print(f"WARN {name}: fetch_jobs() returned 0 jobs in {elapsed:.1f}s — check the query")
-        return True
+        return True, f"WARN {name}: fetch_jobs() returned 0 jobs in {elapsed:.1f}s — check the query"
 
-    print(f"ok   {name}: {len(jobs)} jobs, {len(filtered)} after filter, {elapsed:.1f}s")
+    lines = [f"ok   {name}: {len(jobs)} jobs, {len(filtered)} after filter, {elapsed:.1f}s"]
     for job in filtered[:3]:
-        print(f"       {job['title']} — {', '.join(job['locations']) or 'no location'}")
+        lines.append(f"       {job['title']} — {', '.join(job['locations']) or 'no location'}")
     if len(filtered) > 3:
-        print(f"       ... and {len(filtered) - 3} more")
-    return True
+        lines.append(f"       ... and {len(filtered) - 3} more")
+    return True, "\n".join(lines)
+
+
+def check(company, twice: bool = False) -> bool:
+    passed, report = _check_report(company, twice=twice)
+    print(report)
+    return passed
 
 
 def main(argv: list[str]) -> int:
@@ -142,7 +154,20 @@ def main(argv: list[str]) -> int:
             print(f"no company matching {wanted} — known: {known}")
             return 2
 
-    passed = sum(check(company, twice=twice) for company in companies)
+    if len(companies) == 1:
+        passed = int(check(companies[0], twice=twice))
+    else:
+        # Fetch boards concurrently (5-10 minutes serially at 160+ companies);
+        # print each buffered report from the main thread as it lands.
+        passed = 0
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = [
+                pool.submit(_check_report, company, twice) for company in companies
+            ]
+            for future in futures:
+                ok, report = future.result()
+                print(report)
+                passed += ok
     print(f"\n{passed}/{len(companies)} passed")
     return 0 if passed == len(companies) else 1
 

@@ -282,6 +282,41 @@ class FeedNormalizationTests(unittest.TestCase):
             jobs = feeds.official_page_jobs("https://careers.example/openings", r"/jobs/(\d+)")
         self.assertEqual(jobs, [job("123", "Software Intern") | {"locations": [], "url": "https://careers.example/jobs/123"}])
 
+    def test_eightfold_paginates_and_reflows_packed_locations(self) -> None:
+        first = FakeResponse(payload={"count": 2, "positions": [
+            {
+                "id": 790315673635,
+                "name": "Software Engineer Intern",
+                "locations": ["Los Gatos,California,United States of America"],
+                "canonicalPositionUrl": "https://host/careers/job/790315673635",
+            }
+        ]})
+        second = FakeResponse(payload={"count": 2, "positions": [
+            {"id": 42, "name": "ML Intern", "location": "Remote,United States"}
+        ]})
+        session = FakeSession(get_responses=[first, second])
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.eightfold_jobs("host", "example.com")
+        self.assertEqual(
+            jobs,
+            [
+                {
+                    "id": "790315673635",
+                    "title": "Software Engineer Intern",
+                    "locations": ["Los Gatos, California, United States of America"],
+                    "url": "https://host/careers/job/790315673635",
+                },
+                {
+                    "id": "42",
+                    "title": "ML Intern",
+                    "locations": ["Remote, United States"],
+                    "url": "https://host/careers/job/42",
+                },
+            ],
+        )
+        self.assertEqual(session.get_calls[0][1]["params"]["start"], 0)
+        self.assertEqual(session.get_calls[1][1]["params"]["start"], 1)
+
     def test_phenom_uses_stable_req_ids_and_multilocations(self) -> None:
         page = {
             "eagerLoadRefineSearch": {
@@ -413,12 +448,16 @@ class AdapterContractTests(unittest.TestCase):
             "Artificial Intelligence Internship",
             "AI Engineer Co-op",
             "Student Researcher, Machine Learning",
+            "Quantitative Developer Intern - Summer 2027",
+            "Quant Dev Intern",
         ]
         rejected = [
             "Design Intern",
             "Finance Co-op",
             "Sales Intern",
             "Product Management Intern",
+            "Quantitative Trader Intern",
+            "Quantitative Researcher Intern",
             "Hardware Engineering Intern",
             "Mechanical Engineering Intern",
             "Data Science Intern",
@@ -481,7 +520,7 @@ class DatabaseDiffTests(unittest.TestCase):
         )
         self.assertEqual(db.sync_and_get_new("Example", [existing, newly_posted]), [])
 
-        connection = db._connect()
+        connection = db.connect()
         try:
             stored_ids = connection.execute(
                 "SELECT job_id FROM jobs WHERE company = ? ORDER BY job_id",
@@ -490,6 +529,63 @@ class DatabaseDiffTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertEqual(stored_ids, [("existing",), ("new",)])
+
+    def test_connect_migrates_pre_last_seen_databases(self) -> None:
+        import sqlite3
+
+        legacy = sqlite3.connect(self.db_path)
+        legacy.executescript(
+            """
+            CREATE TABLE jobs (
+                company TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                locations TEXT NOT NULL,
+                first_seen TEXT NOT NULL,
+                PRIMARY KEY (company, job_id)
+            );
+            CREATE TABLE companies_meta (
+                company TEXT PRIMARY KEY,
+                initialized_at TEXT NOT NULL
+            );
+            """
+        )
+        legacy.execute(
+            "INSERT INTO jobs VALUES ('Example', 'old', 'Intern', '', '2024-01-01T00:00:00+00:00')"
+        )
+        legacy.commit()
+        legacy.close()
+
+        connection = db.connect()
+        try:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT last_seen FROM jobs WHERE job_id = 'old'"
+                ).fetchone(),
+                ("2024-01-01T00:00:00+00:00",),
+            )
+        finally:
+            connection.close()
+
+    def test_prune_drops_only_rows_unseen_past_the_window(self) -> None:
+        db.sync_and_get_new("Example", [job("current")])
+        connection = db.connect()
+        try:
+            connection.execute(
+                "UPDATE jobs SET last_seen = '2020-01-01T00:00:00+00:00' "
+                "WHERE job_id = 'current'"
+            )
+            connection.execute(
+                "INSERT INTO jobs VALUES "
+                "('Example', 'fresh', 'Intern', '', '2020-01-01T00:00:00+00:00', ?)",
+                (db.datetime.now(db.timezone.utc).isoformat(),),
+            )
+            connection.commit()
+            self.assertEqual(db.prune_stale(connection), 1)
+            remaining = connection.execute("SELECT job_id FROM jobs").fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(remaining, [("fresh",)])
 
 
 class PollerTests(unittest.TestCase):
@@ -513,9 +609,13 @@ class PollerTests(unittest.TestCase):
             patch.object(watch.notify, "ensure_opted_in"),
             patch.object(watch.notify, "notify_new_job"),
             patch.object(watch.db, "sync_and_get_new", return_value=[] ) as sync,
+            patch.object(watch.db, "connect") as connect,
+            patch.object(watch.db, "prune_stale", return_value=0),
         ):
             watch.run()
-        sync.assert_called_once_with("Good", [job("good")])
+        sync.assert_called_once_with(
+            "Good", [job("good")], conn=connect.return_value
+        )
 
     def test_run_notifies_only_job_added_after_initial_poll(self) -> None:
         class Company(SimpleNamespace):

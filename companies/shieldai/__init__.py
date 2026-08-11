@@ -1,7 +1,6 @@
 """Shield AI jobs from the Lever board linked by its official careers page."""
 
-from ...ats import lever
-from ...filters import swe_ml_jobs
+from ..feeds import lever_internships_us
 
 COMPANY_NAME = "Shield AI"
 CAREERS_URL = "https://shield.ai/careers/"
@@ -9,6 +8,4 @@ CAREERS_URL = "https://shield.ai/careers/"
 
 def fetch_jobs() -> list[dict]:
     """Match Shield AI's official Lever ``commitment=Intern`` view."""
-    return swe_ml_jobs(
-        lever("shieldai", commitment="Intern", country="United States")
-    )
+    return lever_internships_us("shieldai")

@@ -29,9 +29,11 @@ One poller, many company adapters:
   site can't take down the other 99.
 - `http.py` is the shared curl_cffi session (`http.session()` / `http.get_json()`).
   **Always use it instead of a raw HTTP client** — see "Mistakes to avoid".
-- `ats.py` has ready-made adapters for Greenhouse and Lever, which between
-  them cover a large share of company job boards. Check these before
-  reverse-engineering anything.
+- `companies/feeds.py` has ready-made helpers for the hosted ATS platforms
+  most companies use — Greenhouse, Lever, Ashby, Workday, Phenom — including
+  `*_internships_us` variants that apply the US SWE/ML-internship focus this
+  poller targets. Check these before reverse-engineering anything.
+  (`ats.py` is a deprecated shim kept only for old imports.)
 - `companies/__init__.py` auto-discovers every subfolder under `companies/`
   at import time (via `pkgutil`). There is no registry list to hand-edit —
   dropping in a correctly-shaped folder is enough.
@@ -65,21 +67,24 @@ Full contract and a worked example (`companies/metacareers/`) are in
 ## Try the easy path first
 
 **Before capturing a single HAR, check whether the company just uses
-Greenhouse or Lever.** Most do, and then the whole adapter is:
+Greenhouse, Lever, or Ashby.** Most do, and then the whole adapter is:
 
 ```python
-from ...ats import greenhouse   # or: lever
+from ..feeds import greenhouse_internships_us   # or: lever_internships_us,
+                                                # ashby_internships_us, ...
 
 COMPANY_NAME = "Anthropic"
+CAREERS_URL = "https://www.anthropic.com/careers"
 
 def fetch_jobs() -> list[dict]:
-    return greenhouse("anthropic")   # the board token
+    return greenhouse_internships_us("anthropic")   # the board token
 ```
 
-The board token is the company slug in `boards.greenhouse.io/<token>` or
-`jobs.lever.co/<token>` — not a secret. If the careers page embeds listings
-in an iframe, the token is usually in the iframe `src`. Confirm by opening
-the endpoint in `ats.py` with that token substituted in.
+The board token is the company slug in `boards.greenhouse.io/<token>`,
+`jobs.lever.co/<token>`, or `jobs.ashbyhq.com/<token>` — not a secret. If
+the careers page embeds listings in an iframe, the token is usually in the
+iframe `src`. Confirm by opening the vendor endpoint in `companies/feeds.py`
+with that token substituted in.
 
 This path has no persisted-query id and no CSRF token, so unlike a
 hand-built client it doesn't rot when the company rebuilds its frontend.
@@ -139,8 +144,8 @@ suddenly breaks, re-capture a fresh HAR rather than guessing at the fix.
 
 - Don't add a manual entry to any "registry" — there isn't one anymore;
   auto-discovery in `companies/__init__.py` handles it.
-- Don't hand-roll a client for a company that's already on Greenhouse or
-  Lever — check `ats.py` first.
+- Don't hand-roll a client for a company that's already on Greenhouse,
+  Lever, or Ashby — check `companies/feeds.py` first.
 - **Don't call an HTTP client directly — use `http.session()`.** A request with
   no timeout hangs its pool thread forever, and a stuck thread can't be
   killed from outside, so one dark career site would permanently consume a

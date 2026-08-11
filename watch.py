@@ -78,9 +78,12 @@ def run() -> None:
 
     # ...but diff and alert serially on the main thread. sqlite doesn't want
     # concurrent writers to one file, Twilio rate-limits, and both legs are
-    # fast enough that there's nothing to win by parallelizing them.
+    # fast enough that there's nothing to win by parallelizing them. One
+    # shared connection covers the whole loop — per-company connections just
+    # re-ran the schema script a hundred-plus times per poll.
+    conn = db.connect()
     for company, jobs in results.items():
-        new_jobs = db.sync_and_get_new(company.COMPANY_NAME, jobs)
+        new_jobs = db.sync_and_get_new(company.COMPANY_NAME, jobs, conn=conn)
         observability.log_event(
             company.COMPANY_NAME,
             "poll_result",
@@ -96,10 +99,15 @@ def run() -> None:
         if not new_jobs:
             print(f"[{company.COMPANY_NAME}] no new postings ({len(jobs)} match filters)")
 
+    pruned = db.prune_stale(conn)
+    conn.close()
+
     elapsed = time.monotonic() - started
     summary = f"polled {len(results)}/{len(COMPANIES)} companies in {elapsed:.1f}s"
     if failures:
         summary += f" — failed: {', '.join(failures)}"
+    if pruned:
+        summary += f" — pruned {pruned} stale row(s)"
     print(summary)
 
 

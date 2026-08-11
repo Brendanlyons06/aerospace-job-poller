@@ -9,20 +9,24 @@ worth alerting on).
 
 ## 0. Check for a hosted board first
 
-Most companies run Greenhouse or Lever, and both have a public JSON API that
-`ats.py` already speaks. When that's the case the entire company is four
-lines and you can skip everything below except step 4:
+Most companies run Greenhouse, Lever, or Ashby, and all three have a public
+JSON API that `feeds.py` already speaks — including `*_internships_us`
+helpers that apply this poller's US SWE/ML-internship focus using the
+vendor's own structured filters. When that's the case the entire company is
+four lines and you can skip everything below except step 4:
 
 ```python
-from ...ats import greenhouse   # or: lever
+from ..feeds import greenhouse_internships_us   # or: lever_internships_us,
+                                                # ashby_internships_us, ...
 
 COMPANY_NAME = "Anthropic"
+CAREERS_URL = "https://www.anthropic.com/careers"
 
 def fetch_jobs() -> list[dict]:
-    return greenhouse("anthropic")   # board token from boards.greenhouse.io/<token>
+    return greenhouse_internships_us("anthropic")   # board token from boards.greenhouse.io/<token>
 ```
 
-`ats.py` returns the normalized dicts already. Only write a `client.py` if
+`feeds.py` returns the normalized dicts already. Only write a `client.py` if
 the company runs its own bespoke job board — see AGENTS.md for how to
 reverse-engineer one from a HAR capture.
 

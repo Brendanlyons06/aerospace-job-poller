@@ -83,6 +83,58 @@ def official_page_jobs(
     return jobs
 
 
+LEVER_URL = "https://api.lever.co/v0/postings/{token}?mode=json"
+
+
+def lever_jobs(
+    board_token: str,
+    *,
+    commitment: str | None = None,
+    country: str | None = None,
+) -> list[dict]:
+    """Every open posting on a company's Lever board.
+
+    ``commitment`` matches Lever's first-party employment-type category, such
+    as ``"Intern"``.  Lever's public postings endpoint returns the full
+    board even when the hosted page displays this filter, so select the
+    category from the API record here rather than inferring it from a mutable
+    job title. ``country="United States"`` validates Lever's client-side
+    location category against the normalized posting locations.
+    """
+    postings = http.get_json(LEVER_URL.format(token=board_token))
+    jobs = []
+    for job in postings:
+        categories = job.get("categories") or {}
+        if commitment is not None and categories.get("commitment") != commitment:
+            continue
+        # allLocations is the multi-location list; older postings only have
+        # the single `location` string.
+        locations = categories.get("allLocations")
+        if not locations:
+            single = categories.get("location")
+            locations = [single] if single else []
+        if country == "United States" and not any(
+            is_us_location(location) for location in locations
+        ):
+            continue
+        jobs.append(
+            {
+                "id": job["id"],  # Lever uses a stable UUID
+                "title": job["text"],
+                "locations": list(locations),
+                "url": job["hostedUrl"],
+            }
+        )
+    return jobs
+
+
+def lever_internships_us(board_token: str) -> list[dict]:
+    """US SWE/ML internships using Lever's own commitment and location fields."""
+    return swe_ml_jobs(
+        lever_jobs(board_token, commitment="Intern", country="United States")
+    )
+
+
 def greenhouse_jobs(board: str, *, content: bool = False) -> list[dict]:
     url = f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs"
     if content:
@@ -757,13 +809,16 @@ def _ashby_location_is_us(location: dict) -> bool:
     return country in {"US", "USA", "United States", "United States of America"}
 
 
-def ashby_internships_us(board: str) -> list[dict]:
+def ashby_internships_us(board: str, *, require_swe_ml: bool = True) -> list[dict]:
     """Mirror Ashby's UI filters using its exact structured posting fields.
 
     Ashby's public job-board UI filters the downloaded payload in the browser;
     the posting API does not accept filter parameters. ``employmentType`` and
     the structured primary/secondary country values are the same fields the
     first-party UI uses, and avoid guessing from title or free-form location.
+
+    ``require_swe_ml=False`` keeps every intern-typed US posting — for AI
+    research labs whose internship titles don't name software or ML.
     """
     payload = http.get_json(f"https://api.ashbyhq.com/posting-api/job-board/{board}")
     jobs = []
@@ -798,7 +853,68 @@ def ashby_internships_us(board: str) -> list[dict]:
                 "url": job.get("jobUrl") or job.get("applyUrl"),
             }
         )
-    return swe_ml_jobs(jobs)
+    return swe_ml_jobs(jobs) if require_swe_ml else jobs
+
+
+def eightfold_jobs(host: str, domain: str, *, query: str = "intern") -> list[dict]:
+    """Read the public search feed of an Eightfold-powered careers site.
+
+    ``host`` is the careers site itself (``explore.jobs.netflix.net``,
+    ``mlp.eightfold.ai``); ``domain`` is the company domain the site passes to
+    its own API (``netflix.com``, ``mlp.com``). Position ids are Eightfold's
+    stable numeric identifiers.
+    """
+    jobs = []
+    seen = set()
+    start = 0
+    page_size = 100
+    with http.session() as session:
+        while True:
+            response = session.get(
+                f"https://{host}/api/apply/v2/jobs",
+                params={
+                    "domain": domain,
+                    "query": query,
+                    "start": start,
+                    "num": page_size,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            positions = payload.get("positions", [])
+            for position in positions:
+                job_id = position.get("id")
+                if not job_id or str(job_id) in seen:
+                    continue
+                seen.add(str(job_id))
+                raw_locations = position.get("locations") or []
+                if not raw_locations and position.get("location"):
+                    raw_locations = [position["location"]]
+                # Eightfold packs locations as "City,State,Country" with no
+                # spaces; reflow them for readable alerts.
+                locations = [
+                    ", ".join(part.strip() for part in location.split(","))
+                    for location in raw_locations
+                    if isinstance(location, str) and location
+                ]
+                jobs.append(
+                    {
+                        "id": str(job_id),
+                        "title": position.get("name", ""),
+                        "locations": locations,
+                        "url": position.get("canonicalPositionUrl")
+                        or f"https://{host}/careers/job/{job_id}",
+                    }
+                )
+            start += len(positions)
+            if not positions or start >= int(payload.get("count") or 0):
+                break
+    return jobs
+
+
+def eightfold_internships_us(host: str, domain: str) -> list[dict]:
+    """US SWE/ML internships from an Eightfold site's own intern search."""
+    return internships_in_us(eightfold_jobs(host, domain))
 
 
 def technical_internships(jobs: list[dict]) -> list[dict]:

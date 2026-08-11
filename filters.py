@@ -24,6 +24,9 @@ SWE_ML_RE = re.compile(
     r"\bsoftware(?:[\s-]+development)?[\s-]+(?:engineer(?:ing)?|developer)\b|"
     r"\bsoftware(?=[\s-]+(?:intern(?:ship)?s?|co[\s-]?op))\b|"
     r"\b(?:swe|sde)\b|"
+    # Quant firms title their software-engineering track "Quantitative
+    # Developer"; trader/researcher tracks stay excluded below.
+    r"\bquant(?:itative)?[\s-]+dev(?:eloper)?\b|"
     r"\bmachine[\s-]+learning\b|"
     r"\bml\b|"
     r"\bai\s*[/&+-]\s*ml\b|"
