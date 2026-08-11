@@ -42,6 +42,7 @@ companies_module = importlib.import_module(f"{PACKAGE}.companies")
 db = importlib.import_module(f"{PACKAGE}.db")
 feeds = importlib.import_module(f"{PACKAGE}.companies.feeds")
 filters = importlib.import_module(f"{PACKAGE}.filters")
+imc = importlib.import_module(f"{PACKAGE}.companies.imc")
 meta_client = importlib.import_module(f"{PACKAGE}.companies.metacareers.client")
 notify = importlib.import_module(f"{PACKAGE}.notify")
 rippling = importlib.import_module(f"{PACKAGE}.companies.rippling")
@@ -93,6 +94,26 @@ class FakeSession:
 
 
 class FeedNormalizationTests(unittest.TestCase):
+    def test_imc_rejects_foreign_greenhouse_results(self) -> None:
+        payload = {
+            "jobs": [
+                {
+                    "id": 1,
+                    "title": "Machine Learning Research Intern - Amsterdam",
+                    "location": {"name": "Amsterdam, Netherlands"},
+                    "absolute_url": "https://job/1",
+                },
+                {
+                    "id": 2,
+                    "title": "Machine Learning Research Intern - Chicago",
+                    "location": {"name": "Chicago, United States"},
+                    "absolute_url": "https://job/2",
+                },
+            ]
+        }
+        with patch.object(feeds.http, "get_json", return_value=payload):
+            self.assertEqual([job["id"] for job in imc.fetch_jobs()], ["2"])
+
     def test_rippling_reads_live_search_config_and_paginates(self) -> None:
         next_data = {
             "props": {
