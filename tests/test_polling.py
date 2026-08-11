@@ -358,6 +358,41 @@ class FeedNormalizationTests(unittest.TestCase):
             jobs = feeds.official_page_jobs("https://careers.example/openings", r"/jobs/(\d+)")
         self.assertEqual(jobs, [job("123", "Software Intern") | {"locations": [], "url": "https://careers.example/jobs/123"}])
 
+    def test_eightfold_paginates_and_reflows_packed_locations(self) -> None:
+        first = FakeResponse(payload={"count": 2, "positions": [
+            {
+                "id": 790315673635,
+                "name": "Software Engineer Intern",
+                "locations": ["Los Gatos,California,United States of America"],
+                "canonicalPositionUrl": "https://host/careers/job/790315673635",
+            }
+        ]})
+        second = FakeResponse(payload={"count": 2, "positions": [
+            {"id": 42, "name": "ML Intern", "location": "Remote,United States"}
+        ]})
+        session = FakeSession(get_responses=[first, second])
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.eightfold_jobs("host", "example.com")
+        self.assertEqual(
+            jobs,
+            [
+                {
+                    "id": "790315673635",
+                    "title": "Software Engineer Intern",
+                    "locations": ["Los Gatos, California, United States of America"],
+                    "url": "https://host/careers/job/790315673635",
+                },
+                {
+                    "id": "42",
+                    "title": "ML Intern",
+                    "locations": ["Remote, United States"],
+                    "url": "https://host/careers/job/42",
+                },
+            ],
+        )
+        self.assertEqual(session.get_calls[0][1]["params"]["start"], 0)
+        self.assertEqual(session.get_calls[1][1]["params"]["start"], 1)
+
     def test_phenom_uses_stable_req_ids_and_multilocations(self) -> None:
         page = {
             "eagerLoadRefineSearch": {
@@ -489,12 +524,16 @@ class AdapterContractTests(unittest.TestCase):
             "Artificial Intelligence Internship",
             "AI Engineer Co-op",
             "Student Researcher, Machine Learning",
+            "Quantitative Developer Intern - Summer 2027",
+            "Quant Dev Intern",
         ]
         rejected = [
             "Design Intern",
             "Finance Co-op",
             "Sales Intern",
             "Product Management Intern",
+            "Quantitative Trader Intern",
+            "Quantitative Researcher Intern",
             "Hardware Engineering Intern",
             "Mechanical Engineering Intern",
             "Data Science Intern",
@@ -566,7 +605,6 @@ class DatabaseDiffTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertEqual(stored_ids, [("existing",), ("new",)])
-
 
 class PollerTests(unittest.TestCase):
     def test_fetch_applies_company_filter(self) -> None:
