@@ -368,7 +368,7 @@ def workday_internships_us(
     # Prefer a single country-level facet. If the site only exposes offices,
     # submit all U.S. office values (OR semantics within a Workday facet).
     for parameter, values, descriptor in groups:
-        if not parameter:
+        if not parameter or parameter in applied:
             continue
         exact_country = [
             value["id"] for value in values
@@ -383,13 +383,18 @@ def workday_internships_us(
             break
     else:
         for parameter, values, _descriptor in groups:
-            if not parameter:
+            # Never clobber an already-applied facet: NGC's job-type values
+            # include "Fixed Term (non-USA)", which is_us_location matches.
+            if not parameter or parameter in applied:
                 continue
             ids = [
                 value["id"] for value in values
                 if is_us_location(value.get("descriptor", ""))
             ]
-            if ids:
+            # Tenants with office-level facets can list thousands of U.S.
+            # sites; Workday 500s on payloads that large. Leave the facet off
+            # and let the client-side U.S. filter below handle location.
+            if ids and len(ids) <= 100:
                 applied[parameter] = ids
                 break
 
