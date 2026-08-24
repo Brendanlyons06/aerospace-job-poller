@@ -129,7 +129,13 @@ def _run_once() -> None:
                 f"{company.COMPANY_NAME} is responding again and returned "
                 f"{len(jobs)} matching jobs.",
             )
-        new_jobs = db.sync_and_get_new(company.COMPANY_NAME, jobs)
+        sync_metadata = {}
+        module_name = getattr(company, "__name__", "")
+        if module_name:
+            sync_metadata["company_slug"] = module_name.rsplit(".", 1)[-1]
+        if getattr(company, "CAREERS_URL", None):
+            sync_metadata["careers_url"] = company.CAREERS_URL
+        new_jobs = db.sync_and_get_new(company.COMPANY_NAME, jobs, **sync_metadata)
         observability.log_event(
             company.COMPANY_NAME,
             "poll_result",

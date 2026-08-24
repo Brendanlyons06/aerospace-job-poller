@@ -13,13 +13,15 @@ this version.
 
 ## Current status
 
-- Runs locally on macOS every 30 minutes with `launchd`.
-- Includes a free hourly GitHub Actions deployment backed by Supabase
-  PostgreSQL; cloud setup requires the repository owner to add four secrets.
+- Runs hourly for free in GitHub Actions with Supabase PostgreSQL persistence.
+- The previous macOS `launchd` scheduler is disabled but preserved as a
+  rollback option.
 - Sends Gmail alerts for newly discovered matching postings.
 - Supports optional Twilio SMS alerts, disabled by default.
 - Has 31 aerospace-profile adapters; the installed pilot enables 14 companies.
-- Passed 48 deterministic tests and live two-pass adapter validation when this
+- Stores dashboard-ready sectors, disciplines, lifecycle dates, structured
+  locations, work modes, and source-published compensation/date metadata.
+- Passed 54 deterministic tests and live two-pass adapter validation when this
   version was prepared.
 
 The installed pilot watches:
@@ -54,6 +56,27 @@ The complete target manifest is maintained in [`profiles.py`](profiles.py).
    flood of alerts.
 5. Later runs place newly discovered jobs in a durable notification outbox.
 6. Failed notifications remain pending and are retried on a later run.
+
+## Dashboard-ready data
+
+Phase 2 keeps company classification separate from job classification. For
+example, SpaceX is in the `space-launch-spacecraft` sector while one of its
+jobs can be classified as `propulsion`, `mechanical-design`, or `systems`.
+
+The persistence layer now maintains:
+
+- Company name, adapter slug, sector, and official careers URL
+- Job discipline, employment type, work mode, application URL, and raw title
+- Source-published posting and closing dates when available
+- First-seen, last-seen, and closed dates observed by the poller
+- Compensation range, currency, and period when published by the source
+- One structured row per location with label, city, state, country, and
+  optional source-provided latitude/longitude
+
+A posting is marked closed after it is absent from two consecutive successful
+polls. This avoids turning a one-hour board inconsistency into a false closure.
+Existing SQLite and Supabase databases upgrade in place; no job history or
+notification state is discarded.
 
 Career-source failures are isolated: one unavailable company does not stop the
 other companies from being checked. The service sends one warning after three
@@ -155,7 +178,8 @@ Follow [`CLOUD_SETUP.md`](CLOUD_SETUP.md) to create the free Supabase project,
 add the four encrypted GitHub Secrets, send a cloud test email, and run the
 first poll. The hourly schedule remains dormant until the `POLLER_ENABLED`
 repository variable is explicitly set to `true`. Keep the Mac scheduler
-enabled until the cloud workflow has been healthy for 48 hours.
+disabled while GitHub Actions is active to prevent duplicate polling. The
+local service files remain available for rollback.
 
 The planned company expansion, dashboard, subscription, and SMS phases are
 tracked in [`ROADMAP.md`](ROADMAP.md).
@@ -165,6 +189,7 @@ tracked in [`ROADMAP.md`](ROADMAP.md).
 | File | Purpose |
 | --- | --- |
 | `profiles.py` | Aerospace target manifest and active role profile |
+| `job_metadata.py` | Dashboard sectors, disciplines, locations, and optional metadata |
 | `filters.py` | Internship, location, and engineering-title matching |
 | `companies/` | One official-careers adapter per company |
 | `watch.py` | Concurrent polling, diffing, alerts, and health handling |

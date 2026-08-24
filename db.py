@@ -21,6 +21,8 @@ from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
+from .job_metadata import company_sector, enrich_job
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(PROJECT_DIR / ".env")
@@ -35,8 +37,44 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT NOT NULL,
     title TEXT NOT NULL,
     locations TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
+    sector TEXT,
+    discipline TEXT,
+    employment_type TEXT,
+    work_mode TEXT,
+    posted_at TEXT,
+    closes_at TEXT,
     first_seen TEXT NOT NULL,
+    last_seen TEXT,
+    closed_at TEXT,
+    missed_polls INTEGER NOT NULL DEFAULT 0,
+    compensation_min REAL,
+    compensation_max REAL,
+    compensation_currency TEXT,
+    compensation_period TEXT,
     PRIMARY KEY (company, job_id)
+);
+
+CREATE TABLE IF NOT EXISTS companies (
+    company TEXT PRIMARY KEY,
+    slug TEXT,
+    sector TEXT NOT NULL,
+    careers_url TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS job_locations (
+    company TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    location_index INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    city TEXT,
+    state TEXT,
+    country TEXT,
+    latitude REAL,
+    longitude REAL,
+    PRIMARY KEY (company, job_id, location_index)
 );
 
 CREATE TABLE IF NOT EXISTS companies_meta (
@@ -75,6 +113,23 @@ CREATE TABLE IF NOT EXISTS system_meta (
 
 _POSTGRES_CONNECTION = None
 _POSTGRES_CONNECTION_URL = ""
+
+_SQLITE_JOB_COLUMNS = {
+    "url": "TEXT NOT NULL DEFAULT ''",
+    "sector": "TEXT",
+    "discipline": "TEXT",
+    "employment_type": "TEXT",
+    "work_mode": "TEXT",
+    "posted_at": "TEXT",
+    "closes_at": "TEXT",
+    "last_seen": "TEXT",
+    "closed_at": "TEXT",
+    "missed_polls": "INTEGER NOT NULL DEFAULT 0",
+    "compensation_min": "REAL",
+    "compensation_max": "REAL",
+    "compensation_currency": "TEXT",
+    "compensation_period": "TEXT",
+}
 
 
 def _database_url() -> str:
@@ -212,7 +267,20 @@ def _connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(_SQLITE_SCHEMA)
+    _upgrade_sqlite_schema(conn)
     return conn
+
+
+def _upgrade_sqlite_schema(conn: sqlite3.Connection) -> None:
+    """Add Phase 2 columns to an existing local database without data loss."""
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    for name, definition in _SQLITE_JOB_COLUMNS.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+    conn.execute("UPDATE jobs SET last_seen = first_seen WHERE last_seen IS NULL")
+    conn.commit()
 
 
 def _execute(conn, statement: str, parameters: tuple = ()):
@@ -254,7 +322,13 @@ def validate_configuration() -> str:
     return backend
 
 
-def sync_and_get_new(company: str, jobs: list[dict]) -> list[dict]:
+def sync_and_get_new(
+    company: str,
+    jobs: list[dict],
+    *,
+    company_slug: str | None = None,
+    careers_url: str | None = None,
+) -> list[dict]:
     """Record jobs and return every undelivered alert for this company.
 
     On a company's first-ever sync, seeds all current jobs as seen and
@@ -275,14 +349,111 @@ def sync_and_get_new(company: str, jobs: list[dict]) -> list[dict]:
         }
 
         now = datetime.now(timezone.utc).isoformat()
-        for job in jobs:
+        sector = company_sector(company)
+        _execute(
+            conn,
+            "INSERT INTO companies "
+            "(company, slug, sector, careers_url, first_seen, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(company) DO UPDATE SET "
+            "slug = COALESCE(excluded.slug, companies.slug), "
+            "sector = excluded.sector, "
+            "careers_url = COALESCE(excluded.careers_url, companies.careers_url), "
+            "last_seen = excluded.last_seen",
+            (company, company_slug, sector, careers_url, now, now),
+        )
+
+        current_ids = [job["id"] for job in jobs]
+        if current_ids:
+            placeholders = ", ".join("?" for _ in current_ids)
             _execute(
                 conn,
-                "INSERT INTO jobs (company, job_id, title, locations, first_seen) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(company, job_id) DO NOTHING",
-                (company, job["id"], job["title"], ", ".join(job["locations"]), now),
+                "UPDATE jobs SET missed_polls = missed_polls + 1 "
+                "WHERE company = ? AND closed_at IS NULL "
+                f"AND job_id NOT IN ({placeholders})",
+                (company, *current_ids),
             )
+        else:
+            _execute(
+                conn,
+                "UPDATE jobs SET missed_polls = missed_polls + 1 "
+                "WHERE company = ? AND closed_at IS NULL",
+                (company,),
+            )
+
+        for job in jobs:
+            metadata = enrich_job(company, job)
+            _execute(
+                conn,
+                "INSERT INTO jobs "
+                "(company, job_id, title, locations, url, sector, discipline, "
+                "employment_type, work_mode, posted_at, closes_at, first_seen, "
+                "last_seen, closed_at, missed_polls, compensation_min, "
+                "compensation_max, compensation_currency, compensation_period) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?) "
+                "ON CONFLICT(company, job_id) DO UPDATE SET "
+                "title = excluded.title, locations = excluded.locations, "
+                "url = excluded.url, sector = excluded.sector, "
+                "discipline = excluded.discipline, "
+                "employment_type = COALESCE(excluded.employment_type, jobs.employment_type), "
+                "work_mode = COALESCE(excluded.work_mode, jobs.work_mode), "
+                "posted_at = COALESCE(excluded.posted_at, jobs.posted_at), "
+                "closes_at = COALESCE(excluded.closes_at, jobs.closes_at), "
+                "last_seen = excluded.last_seen, closed_at = NULL, missed_polls = 0, "
+                "compensation_min = COALESCE(excluded.compensation_min, jobs.compensation_min), "
+                "compensation_max = COALESCE(excluded.compensation_max, jobs.compensation_max), "
+                "compensation_currency = COALESCE(excluded.compensation_currency, jobs.compensation_currency), "
+                "compensation_period = COALESCE(excluded.compensation_period, jobs.compensation_period)",
+                (
+                    company,
+                    job["id"],
+                    job["title"],
+                    ", ".join(job["locations"]),
+                    job.get("url", ""),
+                    metadata["sector"],
+                    metadata["discipline"],
+                    metadata["employment_type"],
+                    metadata["work_mode"],
+                    metadata["posted_at"],
+                    metadata["closes_at"],
+                    now,
+                    now,
+                    metadata["compensation_min"],
+                    metadata["compensation_max"],
+                    metadata["compensation_currency"],
+                    metadata["compensation_period"],
+                ),
+            )
+            _execute(
+                conn,
+                "DELETE FROM job_locations WHERE company = ? AND job_id = ?",
+                (company, job["id"]),
+            )
+            for index, location in enumerate(metadata["structured_locations"]):
+                _execute(
+                    conn,
+                    "INSERT INTO job_locations "
+                    "(company, job_id, location_index, label, city, state, country, "
+                    "latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        company,
+                        job["id"],
+                        index,
+                        location["label"],
+                        location["city"],
+                        location["state"],
+                        location["country"],
+                        location["latitude"],
+                        location["longitude"],
+                    ),
+                )
+
+        _execute(
+            conn,
+            "UPDATE jobs SET closed_at = ?, missed_polls = 2 "
+            "WHERE company = ? AND closed_at IS NULL AND missed_polls >= 2",
+            (now, company),
+        )
 
         if not already_initialized:
             _execute(

@@ -58,12 +58,14 @@ The first cloud poll establishes a baseline and intentionally does not email
 every internship that was already open. Future newly discovered postings do
 generate alerts.
 
-## 4. Observe before disabling the Mac scheduler
+## 4. Validate before disabling the Mac scheduler
 
-Let the GitHub workflow complete successfully for 48 hours. Keep the local
-Mac scheduler active during that observation window. Once the cloud history
-shows reliable hourly runs, disable the Mac scheduler to avoid two independent
-pollers sending duplicate notifications.
+Run two consecutive real cloud polls and confirm both use the PostgreSQL
+backend. The first establishes or updates the Supabase state; the second must
+finish with no duplicate notifications. Once both pass, disable the Mac
+scheduler to avoid two independent pollers racing to notify for the same jobs.
+For a more conservative cutover, observing normal hourly runs for 24–48 hours
+is still an option, but it is not technically required.
 
 ## Cost guardrails
 

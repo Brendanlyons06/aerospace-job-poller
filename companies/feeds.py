@@ -22,6 +22,18 @@ from ..filters import (
 )
 
 
+def _add_optional(job: dict, **fields) -> dict:
+    """Attach source metadata only when the board actually published it."""
+    job.update(
+        {
+            key: value
+            for key, value in fields.items()
+            if value is not None and value != "" and value != {}
+        }
+    )
+    return job
+
+
 def _embedded_json(page: str, marker: str):
     """Decode the JSON value immediately following a unique page marker."""
     start = page.find(marker)
@@ -145,13 +157,40 @@ def clearcompany_internships_us(
                 job_id = posting.get("id")
                 url = posting.get("applyLink")
                 if job_id and url:
+                    coordinate_details = []
+                    for location in posting.get("locations") or []:
+                        if not isinstance(location, dict):
+                            continue
+                        latitude = location.get("latitude") or location.get("lat")
+                        longitude = location.get("longitude") or location.get("lng")
+                        if latitude is None or longitude is None:
+                            continue
+                        label = ", ".join(
+                            value for value in (
+                                location.get("city"), location.get("subdivision")
+                            ) if value
+                        ) or "United States"
+                        coordinate_details.append({
+                            "label": label,
+                            "city": location.get("city"),
+                            "state": location.get("subdivision"),
+                            "country": "US",
+                            "latitude": latitude,
+                            "longitude": longitude,
+                        })
                     jobs.append(
-                        {
+                        _add_optional({
                             "id": str(job_id),
                             "title": title,
                             "locations": list(dict.fromkeys(locations)),
                             "url": url,
-                        }
+                        },
+                        posted_at=posting.get("datePosted")
+                        or posting.get("publishedDate"),
+                        closes_at=posting.get("closeDate")
+                        or posting.get("applicationDeadline"),
+                        employment_type="internship",
+                        location_details=coordinate_details or None)
                     )
             page_index += 1
             total = int(payload.get("totalCount") or len(page))
@@ -199,13 +238,26 @@ def impulse_space_internships_us(*, title_filter=None) -> list[dict]:
         url = posting.get("url")
         id_match = re.search(r"/postings/([0-9a-f-]+)", url or "", re.IGNORECASE)
         if id_match:
+            latitude = location.get("latitude") or location.get("lat")
+            longitude = location.get("longitude") or location.get("lng")
             jobs.append(
-                {
+                _add_optional({
                     "id": id_match.group(1),
                     "title": title,
                     "locations": [label],
                     "url": url,
-                }
+                },
+                posted_at=posting.get("publishedAt") or posting.get("createdAt"),
+                closes_at=posting.get("closesAt") or posting.get("applicationDeadline"),
+                employment_type="internship",
+                location_details=[{
+                    "label": label,
+                    "city": location.get("name"),
+                    "state": location.get("province"),
+                    "country": "US",
+                    "latitude": latitude,
+                    "longitude": longitude,
+                }] if latitude is not None and longitude is not None else None)
             )
     return jobs
 
@@ -308,13 +360,27 @@ def lever_jobs(
             is_us_location(location) for location in locations
         ):
             continue
+        salary = job.get("salaryRange") or {}
         jobs.append(
-            {
+            _add_optional({
                 "id": job["id"],  # Lever uses a stable UUID
                 "title": job["text"],
                 "locations": list(locations),
                 "url": job["hostedUrl"],
-            }
+            },
+            posted_at=job.get("createdAt"),
+            employment_type=categories.get("commitment"),
+            work_mode=(
+                    str(job.get("workplaceType")).lower()
+                    if job.get("workplaceType")
+                    else None
+                ),
+            compensation={
+                "min": salary.get("min"),
+                "max": salary.get("max"),
+                "currency": salary.get("currency"),
+                "period": salary.get("interval"),
+            } if any(value is not None for value in salary.values()) else None)
         )
     return jobs
 
@@ -997,12 +1063,14 @@ def phenom_jobs(careers_url: str) -> list[dict]:
                 if isinstance(locations, str):
                     locations = [locations]
                 jobs.append(
-                    {
+                    _add_optional({
                         "id": str(job_id),
                         "title": job.get("title", ""),
                         "locations": locations,
                         "url": job.get("applyUrl") or careers_url,
-                    }
+                    },
+                    posted_at=job.get("postedDate") or job.get("datePosted"),
+                    closes_at=job.get("endDate") or job.get("applicationDeadline"))
                 )
             if not page or len(page) < page_size or (
                 total_hits is not None and len(jobs) >= total_hits
@@ -1018,12 +1086,23 @@ def ashby_jobs(board: str) -> list[dict]:
         location = job.get("location")
         locations = [location] if isinstance(location, str) and location else []
         jobs.append(
-            {
+            _add_optional({
                 "id": str(job["id"]),
                 "title": job["title"],
                 "locations": locations,
                 "url": job.get("jobUrl") or job.get("applyUrl"),
-            }
+            },
+            posted_at=job.get("publishedAt"),
+            closes_at=job.get("applicationDeadline") or job.get("closeDate"),
+            employment_type=job.get("employmentType"),
+            work_mode=(
+                    "remote"
+                    if job.get("isRemote") is True
+                    else job.get("workplaceType")
+                ),
+            compensation=job.get("compensation")
+                or job.get("compensationTierSummary")
+                or None)
         )
     return jobs
 
@@ -1075,13 +1154,46 @@ def ashby_internships_us(
             location if is_us_location(location) else f"{location}, United States"
             for location in us_locations
         ]
+        coordinate_details = []
+        for location in raw_locations:
+            if not isinstance(location, dict) or not _ashby_location_is_us(location):
+                continue
+            raw_label = location.get("name") or location.get("location")
+            if not raw_label:
+                continue
+            label = raw_label if is_us_location(raw_label) else f"{raw_label}, United States"
+            address = (location.get("address") or {}).get("postalAddress") or {}
+            latitude = location.get("latitude") or address.get("latitude")
+            longitude = location.get("longitude") or address.get("longitude")
+            if latitude is None or longitude is None:
+                continue
+            coordinate_details.append({
+                "label": label,
+                "city": address.get("addressLocality"),
+                "state": address.get("addressRegion"),
+                "country": "US",
+                "latitude": latitude,
+                "longitude": longitude,
+            })
         jobs.append(
-            {
+            _add_optional({
                 "id": str(job["id"]),
                 "title": job["title"],
                 "locations": list(dict.fromkeys(us_locations)),
                 "url": job.get("jobUrl") or job.get("applyUrl"),
-            }
+            },
+            posted_at=job.get("publishedAt"),
+            closes_at=job.get("applicationDeadline") or job.get("closeDate"),
+            employment_type=job.get("employmentType"),
+            work_mode=(
+                    "remote"
+                    if job.get("isRemote") is True
+                    else job.get("workplaceType")
+                ),
+            compensation=job.get("compensation")
+                or job.get("compensationTierSummary")
+                or None,
+            location_details=coordinate_details or None)
         )
     if not require_swe_ml:
         return jobs

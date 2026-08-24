@@ -19,14 +19,20 @@ are introduced only when usage or SMS delivery requires them.
 - Supabase PostgreSQL persistence with versioned migrations
 - Cloud fail-safe that prohibits temporary SQLite fallback
 - Encrypted GitHub Secrets and explicit schedule activation
-- 48-hour observation period before retiring the Mac scheduler
+- Two consecutive real cloud polls confirming persistence and deduplication
+  before retiring the Mac scheduler
 
-## Phase 2 — dashboard-ready data
+## Phase 2 — dashboard-ready data — complete
 
 - Separate company-sector and job-discipline classifications
 - Posted, closing, first-seen, last-seen, and closed dates
 - Structured city/state locations and geographic coordinates
 - Remote/hybrid/on-site and compensation fields when published
+
+Implemented with backward-compatible SQLite upgrades and Supabase migration
+`002_dashboard_ready_data.sql`. A posting closes after two consecutive
+successful polls no longer return it, limiting false closures from transient
+career-board inconsistencies.
 
 ## Phase 3 — company expansion
 

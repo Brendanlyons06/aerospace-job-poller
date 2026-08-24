@@ -44,6 +44,7 @@ companies_module = importlib.import_module(f"{PACKAGE}.companies")
 db = importlib.import_module(f"{PACKAGE}.db")
 feeds = importlib.import_module(f"{PACKAGE}.companies.feeds")
 filters = importlib.import_module(f"{PACKAGE}.filters")
+job_metadata = importlib.import_module(f"{PACKAGE}.job_metadata")
 imc = importlib.import_module(f"{PACKAGE}.companies.imc")
 meta_client = importlib.import_module(f"{PACKAGE}.companies.metacareers.client")
 notify = importlib.import_module(f"{PACKAGE}.notify")
@@ -271,6 +272,7 @@ class FeedNormalizationTests(unittest.TestCase):
                         "title": "Machine Learning Intern",
                         "locations": ["New York"],
                         "url": "https://job/us",
+                        "employment_type": "Intern",
                     }
                 ],
             )
@@ -555,7 +557,14 @@ class AtsTests(unittest.TestCase):
             {"id": "full", "text": "Software Engineer", "hostedUrl": "https://job/full", "categories": {"commitment": "Full-time", "location": "Austin, TX"}},
         ]
         with patch.object(ats.http, "get_json", return_value=postings):
-            self.assertEqual(ats.lever("board", commitment="Intern"), [job("intern", "Software Intern") | {"locations": ["Remote"], "url": "https://job/intern"}])
+            self.assertEqual(
+                ats.lever("board", commitment="Intern"),
+                [job("intern", "Software Intern") | {
+                    "locations": ["Remote"],
+                    "url": "https://job/intern",
+                    "employment_type": "Intern",
+                }],
+            )
 
     def test_lever_can_restrict_exact_intern_commitment_to_us_locations(self) -> None:
         postings = [
@@ -733,6 +742,66 @@ class AdapterContractTests(unittest.TestCase):
         self.assertTrue(any("not a URL" in error for error in errors))
 
 
+class DashboardMetadataTests(unittest.TestCase):
+    def test_company_sector_is_separate_from_job_discipline(self) -> None:
+        self.assertEqual(
+            job_metadata.company_sector("SpaceX"),
+            "space-launch-spacecraft",
+        )
+        self.assertEqual(
+            job_metadata.company_sector("Northrop Grumman"),
+            "aerospace-defense",
+        )
+        self.assertEqual(
+            job_metadata.classify_discipline("Mechanical Design Engineering Intern"),
+            "mechanical-design",
+        )
+
+    def test_specific_discipline_rules_take_priority(self) -> None:
+        cases = {
+            "GNC Engineering Intern": "gnc",
+            "Flight Controls Intern": "flight-controls",
+            "Systems Integration & Test Intern": "systems-integration-test",
+            "Propulsion Engineering Intern": "propulsion",
+            "General Engineering Intern": "general-engineering",
+        }
+        for title, expected in cases.items():
+            with self.subTest(title=title):
+                self.assertEqual(job_metadata.classify_discipline(title), expected)
+
+    def test_locations_are_structured_without_discarding_source_label(self) -> None:
+        standard = job_metadata.structured_location("Long Beach, California, United States")
+        reverse = job_metadata.structured_location("US, NY, New York")
+        workday = job_metadata.structured_location("United States-Virginia-Dulles")
+        remote = job_metadata.structured_location("Remote, United States")
+        self.assertEqual(
+            (standard["city"], standard["state"], standard["country"]),
+            ("Long Beach", "CA", "US"),
+        )
+        self.assertEqual((reverse["city"], reverse["state"]), ("New York", "NY"))
+        self.assertEqual((workday["city"], workday["state"]), ("Dulles", "VA"))
+        self.assertIsNone(remote["city"])
+        self.assertEqual(remote["label"], "Remote, United States")
+
+    def test_optional_dashboard_fields_are_normalized(self) -> None:
+        enriched = job_metadata.enrich_job(
+            "Joby Aviation",
+            job("42", "Hybrid Flight Test Engineering Intern") | {
+                "posted_at": 1_787_500_800_000,
+                "compensation": {
+                    "min": "30.50",
+                    "max": 42,
+                    "currency": "USD",
+                    "period": "hour",
+                },
+            },
+        )
+        self.assertEqual(enriched["work_mode"], "hybrid")
+        self.assertEqual(enriched["discipline"], "flight-test")
+        self.assertEqual(enriched["compensation_min"], 30.5)
+        self.assertTrue(enriched["posted_at"].endswith("+00:00"))
+
+
 class DatabaseDiffTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -811,6 +880,109 @@ class DatabaseDiffTests(unittest.TestCase):
         db.mark_weekly_summary_sent(now=started + timedelta(days=7))
         self.assertFalse(db.weekly_summary_due(now=started + timedelta(days=8)))
 
+    def test_dashboard_rows_and_two_poll_closure_lifecycle(self) -> None:
+        posting = job("phase-2", "Mechanical Design Engineering Intern") | {
+            "locations": ["Long Beach, CA"],
+            "posted_at": "2026-08-20T12:00:00Z",
+            "closes_at": "2026-09-15T23:59:59Z",
+            "work_mode": "hybrid",
+            "compensation": {
+                "min": 28,
+                "max": 36,
+                "currency": "USD",
+                "period": "hour",
+            },
+            "location_details": [{
+                "label": "Long Beach, CA",
+                "latitude": 33.7701,
+                "longitude": -118.1937,
+            }],
+        }
+        db.sync_and_get_new(
+            "SpaceX",
+            [posting],
+            company_slug="spacex",
+            careers_url="https://www.spacex.com/careers/",
+        )
+
+        connection = db._connect()
+        try:
+            company_row = connection.execute(
+                "SELECT slug, sector, careers_url FROM companies WHERE company = ?",
+                ("SpaceX",),
+            ).fetchone()
+            job_row = connection.execute(
+                "SELECT discipline, work_mode, posted_at, closes_at, last_seen, "
+                "closed_at, compensation_min, compensation_max FROM jobs "
+                "WHERE company = ? AND job_id = ?",
+                ("SpaceX", "phase-2"),
+            ).fetchone()
+            location_row = connection.execute(
+                "SELECT city, state, country, latitude, longitude FROM job_locations "
+                "WHERE company = ? AND job_id = ?",
+                ("SpaceX", "phase-2"),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            company_row,
+            ("spacex", "space-launch-spacecraft", "https://www.spacex.com/careers/"),
+        )
+        self.assertEqual(job_row[:4], (
+            "mechanical-design", "hybrid", "2026-08-20T12:00:00+00:00",
+            "2026-09-15T23:59:59+00:00",
+        ))
+        self.assertIsNotNone(job_row[4])
+        self.assertIsNone(job_row[5])
+        self.assertEqual(job_row[6:], (28.0, 36.0))
+        self.assertEqual(location_row, ("Long Beach", "CA", "US", 33.7701, -118.1937))
+
+        db.sync_and_get_new("SpaceX", [])
+        connection = db._connect()
+        try:
+            self.assertIsNone(connection.execute(
+                "SELECT closed_at FROM jobs WHERE company = ? AND job_id = ?",
+                ("SpaceX", "phase-2"),
+            ).fetchone()[0])
+        finally:
+            connection.close()
+
+        db.sync_and_get_new("SpaceX", [])
+        connection = db._connect()
+        try:
+            self.assertIsNotNone(connection.execute(
+                "SELECT closed_at FROM jobs WHERE company = ? AND job_id = ?",
+                ("SpaceX", "phase-2"),
+            ).fetchone()[0])
+        finally:
+            connection.close()
+
+    def test_existing_sqlite_database_is_upgraded_without_losing_jobs(self) -> None:
+        connection = sqlite3.connect(self.db_path)
+        connection.execute(
+            "CREATE TABLE jobs (company TEXT NOT NULL, job_id TEXT NOT NULL, "
+            "title TEXT NOT NULL, locations TEXT NOT NULL, first_seen TEXT NOT NULL, "
+            "PRIMARY KEY (company, job_id))"
+        )
+        connection.execute(
+            "INSERT INTO jobs VALUES (?, ?, ?, ?, ?)",
+            ("Example", "old", "Mechanical Intern", "Austin, TX", "2026-08-01"),
+        )
+        connection.commit()
+        connection.close()
+
+        upgraded = db._connect()
+        try:
+            columns = {row[1] for row in upgraded.execute("PRAGMA table_info(jobs)")}
+            preserved = upgraded.execute(
+                "SELECT title, first_seen, last_seen FROM jobs WHERE job_id = 'old'"
+            ).fetchone()
+        finally:
+            upgraded.close()
+        self.assertTrue({"discipline", "last_seen", "closed_at", "work_mode"} <= columns)
+        self.assertEqual(preserved, ("Mechanical Intern", "2026-08-01", "2026-08-01"))
+
 
 class DatabaseConfigurationTests(unittest.TestCase):
     def test_local_mode_defaults_to_sqlite(self) -> None:
@@ -864,6 +1036,12 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn(
             "ALTER TABLE notification_outbox ENABLE ROW LEVEL SECURITY", migration
         )
+        dashboard_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "002_dashboard_ready_data.sql"
+        ).read_text()
+        self.assertIn("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS discipline", dashboard_migration)
+        self.assertIn("CREATE TABLE IF NOT EXISTS job_locations", dashboard_migration)
+        self.assertIn("ALTER TABLE job_locations ENABLE ROW LEVEL SECURITY", dashboard_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
