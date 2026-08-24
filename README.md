@@ -14,10 +14,12 @@ this version.
 ## Current status
 
 - Runs locally on macOS every 30 minutes with `launchd`.
+- Includes a free hourly GitHub Actions deployment backed by Supabase
+  PostgreSQL; cloud setup requires the repository owner to add four secrets.
 - Sends Gmail alerts for newly discovered matching postings.
 - Supports optional Twilio SMS alerts, disabled by default.
 - Has 31 aerospace-profile adapters; the installed pilot enables 14 companies.
-- Passed 40 deterministic tests and live two-pass adapter validation when this
+- Passed 46 deterministic tests and live two-pass adapter validation when this
   version was prepared.
 
 The installed pilot watches:
@@ -47,8 +49,9 @@ The complete target manifest is maintained in [`profiles.py`](profiles.py).
    them.
 3. The aerospace profile keeps U.S. internships with relevant engineering
    titles and excludes unrelated software roles.
-4. SQLite stores stable company/job IDs, so the first run seeds existing jobs
-   without sending a flood of alerts.
+4. SQLite locally or Supabase PostgreSQL in the cloud stores stable
+   company/job IDs, so the first run seeds existing jobs without sending a
+   flood of alerts.
 5. Later runs place newly discovered jobs in a durable notification outbox.
 6. Failed notifications remain pending and are retried on a later run.
 
@@ -141,6 +144,22 @@ See [`AEROSPACE_PROFILE.md`](AEROSPACE_PROFILE.md) for the profile and local
 deployment notes, and [`companies/README.md`](companies/README.md) for the
 adapter contract.
 
+## Free cloud schedule
+
+The checked-in GitHub Actions workflow runs the 14-company pilot hourly at
+17 minutes past the hour. It uses Supabase PostgreSQL for durable state and
+refuses to poll if the database secret is missing, preventing accidental use
+of a temporary runner-local database.
+
+Follow [`CLOUD_SETUP.md`](CLOUD_SETUP.md) to create the free Supabase project,
+add the four encrypted GitHub Secrets, send a cloud test email, and run the
+first poll. The hourly schedule remains dormant until the `POLLER_ENABLED`
+repository variable is explicitly set to `true`. Keep the Mac scheduler
+enabled until the cloud workflow has been healthy for 48 hours.
+
+The planned company expansion, dashboard, subscription, and SMS phases are
+tracked in [`ROADMAP.md`](ROADMAP.md).
+
 ## Important files
 
 | File | Purpose |
@@ -149,7 +168,9 @@ adapter contract.
 | `filters.py` | Internship, location, and engineering-title matching |
 | `companies/` | One official-careers adapter per company |
 | `watch.py` | Concurrent polling, diffing, alerts, and health handling |
-| `db.py` | SQLite job history, outbox, and source-health state |
+| `db.py` | SQLite/PostgreSQL job history, outbox, and source-health state |
+| `supabase/migrations/` | Versioned cloud database schema |
+| `.github/workflows/hourly-poller.yml` | Free hourly cloud schedule |
 | `notify.py` | Gmail and optional Twilio delivery |
 | `check.py` | Read-only adapter and stable-ID validation |
 | `deploy_macos.sh` | Safe macOS runtime deployment |

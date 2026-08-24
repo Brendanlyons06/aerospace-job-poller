@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -809,6 +810,85 @@ class DatabaseDiffTests(unittest.TestCase):
         self.assertTrue(db.weekly_summary_due(now=started + timedelta(days=7)))
         db.mark_weekly_summary_sent(now=started + timedelta(days=7))
         self.assertFalse(db.weekly_summary_due(now=started + timedelta(days=8)))
+
+
+class DatabaseConfigurationTests(unittest.TestCase):
+    def test_local_mode_defaults_to_sqlite(self) -> None:
+        with patch.dict(
+            db.os.environ,
+            {"JOB_POLLER_DATABASE_URL": "", "JOB_POLLER_REQUIRE_POSTGRES": "false"},
+        ):
+            self.assertEqual(db.backend_name(), "sqlite")
+            self.assertEqual(db.validate_configuration(), "sqlite")
+
+    def test_cloud_mode_refuses_to_fall_back_to_sqlite(self) -> None:
+        with patch.dict(
+            db.os.environ,
+            {"JOB_POLLER_DATABASE_URL": "", "JOB_POLLER_REQUIRE_POSTGRES": "true"},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requires.*DATABASE_URL"):
+                db.validate_configuration()
+
+    def test_postgres_parameter_markers_are_translated(self) -> None:
+        connection = Mock()
+        db._execute(
+            connection,
+            "SELECT 1 FROM jobs WHERE company = ? AND job_id = ?",
+            ("Example", "123"),
+        )
+        connection.execute.assert_called_once_with(
+            "SELECT 1 FROM jobs WHERE company = %s AND job_id = %s",
+            ("Example", "123"),
+        )
+
+    def test_postgres_migration_enables_row_level_security(self) -> None:
+        migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "001_poller_state.sql"
+        ).read_text()
+        self.assertIn("ALTER TABLE jobs ENABLE ROW LEVEL SECURITY", migration)
+        self.assertIn(
+            "ALTER TABLE notification_outbox ENABLE ROW LEVEL SECURITY", migration
+        )
+
+    def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "hourly-poller.yml"
+        ).read_text()
+        self.assertIn("vars.POLLER_ENABLED == 'true'", workflow)
+        self.assertIn("JOB_POLLER_REQUIRE_POSTGRES: \"true\"", workflow)
+        self.assertIn("secrets.SUPABASE_DATABASE_URL", workflow)
+
+    def test_postgres_style_queries_preserve_dedup_and_outbox_behavior(self) -> None:
+        class PostgresStyleConnection:
+            """Exercise the PostgreSQL parameter path against an in-memory DB."""
+
+            def __init__(self) -> None:
+                self.inner = sqlite3.connect(":memory:")
+                self.inner.executescript(db._SQLITE_SCHEMA)
+
+            def execute(self, statement, parameters=()):
+                return self.inner.execute(statement.replace("%s", "?"), parameters)
+
+            def commit(self) -> None:
+                self.inner.commit()
+
+            def rollback(self) -> None:
+                self.inner.rollback()
+
+        connection = PostgresStyleConnection()
+        existing = job("existing")
+        newly_posted = job("new", "Mechanical Engineering Intern")
+        with patch.object(db, "_connect", return_value=connection):
+            self.assertEqual(db.sync_and_get_new("Example", [existing]), [])
+            self.assertEqual(
+                db.sync_and_get_new("Example", [existing, newly_posted]),
+                [newly_posted],
+            )
+            db.mark_notification_delivered("Example", "new")
+            self.assertEqual(
+                db.sync_and_get_new("Example", [existing, newly_posted]), []
+            )
+        connection.inner.close()
 
 class PollerTests(unittest.TestCase):
     def test_fetch_applies_company_filter(self) -> None:

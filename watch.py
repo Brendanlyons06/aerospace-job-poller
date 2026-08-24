@@ -28,7 +28,7 @@ from .companies import COMPANIES
 # 2MB scales that 148MB figure linearly, into OOM range on a 1GB box.
 # Raise this only if you hit a real wall-clock wall, never for tidiness.
 MAX_WORKERS = 12
-LOCK_PATH = Path(__file__).resolve().parent / ".job-poller.lock"
+LOCK_PATH = db.DB_PATH.with_name(".job-poller.lock")
 
 
 def _send_health_message(subject: str, body: str) -> bool:
@@ -85,6 +85,8 @@ def _fetch(company, run_id: str | None = None) -> list[dict]:
 
 
 def _run_once() -> None:
+    backend = db.validate_configuration()
+    print(f"database backend: {backend}")
     notify.validate_configuration()
     notify.ensure_opted_in()
     started = time.monotonic()
@@ -171,6 +173,7 @@ def _run_once() -> None:
 
 def run() -> None:
     """Run one poll, or skip cleanly when another poll is already active."""
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOCK_PATH.open("w") as lock_file:
         try:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

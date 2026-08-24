@@ -1,0 +1,81 @@
+name: Hourly Aerospace Job Poller
+
+on:
+  schedule:
+    # Avoid the top of the hour, when GitHub's scheduler is busiest.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Choose a real poll or a notification-only test
+        required: true
+        default: poll
+        type: choice
+        options:
+          - poll
+          - test-notification
+
+concurrency:
+  group: aerospace-job-poller
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  poll:
+    # Scheduled runs stay dormant until setup is fully tested. Manual runs
+    # remain available while POLLER_ENABLED is absent or false.
+    if: github.event_name == 'workflow_dispatch' || vars.POLLER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JOB_POLLER_PROFILE: aerospace
+      JOB_POLLER_COMPANIES: spacex,blueorigin,northropgrumman,geaerospace,rocketlab,relativityspace,fireflyaerospace,impulsespace,trueanomaly,apexspace,vastspace,aerovironment,jobyaviation,betatechnologies
+      JOB_POLLER_REQUIRE_POSTGRES: "true"
+      JOB_POLLER_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+      EMAIL_ALERTS_ENABLED: "true"
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      SMS_ALERTS_ENABLED: "false"
+
+    steps:
+      - name: Check out the private repository
+        uses: actions/checkout@v4
+        with:
+          path: job-poller
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: job-poller/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r job-poller/requirements.txt
+
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          if [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ] || [ -z "$EMAIL_TO" ]; then
+            echo "Missing one or more email secrets: SMTP_USER, SMTP_PASSWORD, EMAIL_TO"
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "poll" ]; then
+            if [ -z "$JOB_POLLER_DATABASE_URL" ]; then
+              echo "Missing SUPABASE_DATABASE_URL"
+              exit 1
+            fi
+          fi
+
+      - name: Send a test notification
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'test-notification'
+        run: python -m job-poller.send_test_notification
+
+      - name: Poll company career sites
+        if: github.event_name == 'schedule' || inputs.mode == 'poll'
+        run: python -m job-poller.watch
