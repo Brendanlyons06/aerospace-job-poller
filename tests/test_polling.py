@@ -1104,6 +1104,14 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS discipline", dashboard_migration)
         self.assertIn("CREATE TABLE IF NOT EXISTS job_locations", dashboard_migration)
         self.assertIn("ALTER TABLE job_locations ENABLE ROW LEVEL SECURITY", dashboard_migration)
+        read_api_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "003_dashboard_read_api.sql"
+        ).read_text()
+        self.assertIn("CREATE VIEW public.dashboard_active_jobs", read_api_migration)
+        self.assertIn("WHERE j.closed_at IS NULL", read_api_migration)
+        self.assertIn("REVOKE ALL ON public.dashboard_active_jobs FROM PUBLIC", read_api_migration)
+        self.assertIn("GRANT SELECT ON public.dashboard_active_jobs TO anon", read_api_migration)
+        self.assertNotIn("notification_outbox", read_api_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (

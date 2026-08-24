@@ -50,10 +50,18 @@ of already-open internships from being emailed during the expansion.
 
 ## Phase 4 — searchable dashboard
 
-- Current job and company views
-- Discipline, sector, company, date, work-mode, and location filters
-- Radius-based geographic search
-- Pagination, keyword search, sorting, and direct application links
+- [x] Private AeroScout dashboard foundation
+- [x] Current-job table backed by a restricted Supabase read view
+- [x] Keyword search, discipline shortcuts, and direct application links
+- [ ] Sector, company, date, work-mode, and location filters
+- [ ] Radius-based geographic search
+- [ ] Pagination and sorting
+
+The first dashboard slice is implemented in `dashboard/`. It displays a safe
+preview when its two Supabase settings are absent and automatically switches
+to the live active-job feed when they are present. The database exposes only
+the job-listing fields needed by the dashboard; notification, health, and
+poller-control tables remain inaccessible.
 
 ## Phase 5 — accounts and email subscriptions
 

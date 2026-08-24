@@ -190,6 +190,26 @@ local service files remain available for rollback.
 The planned company expansion, dashboard, subscription, and SMS phases are
 tracked in [`ROADMAP.md`](ROADMAP.md).
 
+## Private AeroScout dashboard
+
+Phase 4 now includes the first dashboard slice in `dashboard/`: a responsive
+current-opportunity table with keyword search, discipline shortcuts, and
+direct application links. It reads active postings through the restricted
+`dashboard_active_jobs` Supabase view created by migration
+`003_dashboard_read_api.sql`; internal poller and delivery data are not
+exposed.
+
+Copy `dashboard/.env.example` to `dashboard/.env.local` and fill in:
+
+```text
+SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+SUPABASE_ANON_KEY=YOUR-SUPABASE-PUBLISHABLE-OR-ANON-KEY
+```
+
+Use only the Supabase publishable/anon key here, never the database password or
+service-role key. Without these settings, the dashboard intentionally displays
+clearly labeled preview data.
+
 ## Important files
 
 | File | Purpose |
@@ -201,6 +221,7 @@ tracked in [`ROADMAP.md`](ROADMAP.md).
 | `watch.py` | Concurrent polling, diffing, alerts, and health handling |
 | `db.py` | SQLite/PostgreSQL job history, outbox, and source-health state |
 | `supabase/migrations/` | Versioned cloud database schema |
+| `dashboard/` | Private AeroScout searchable dashboard |
 | `.github/workflows/hourly-poller.yml` | Free hourly cloud schedule |
 | `notify.py` | Gmail and optional Twilio delivery |
 | `check.py` | Read-only adapter and stable-ID validation |
