@@ -2,12 +2,15 @@
 
 from html import unescape
 from html.parser import HTMLParser
+import os
 import re
 
 from ... import http
-from ...filters import is_swe_ml_title, is_us_job
+from ...filters import is_internship_title, is_us_job
+from ...profiles import PROFILE_AEROSPACE, normalized_profile, role_title_filter
 
-COMPANY_NAME = "Apple"
+COMPANY_NAME = "Apple Hardware Engineering"
+CAREERS_URL = "https://jobs.apple.com/en-us/search"
 SEARCH_URL = "https://jobs.apple.com/en-us/search"
 
 
@@ -113,5 +116,25 @@ def fetch_jobs() -> list[dict]:
 
 
 def filter_jobs(jobs: list[dict]) -> list[dict]:
-    """The request uses Apple's Internship team; keep U.S. SWE/ML results."""
-    return [job for job in jobs if is_us_job(job) and is_swe_ml_title(job["title"])]
+    """Keep the selected profile's U.S. engineering internships."""
+    predicate = role_title_filter(include_generic_engineering=True)
+    include_hardware = (
+        normalized_profile(os.environ.get("JOB_POLLER_PROFILE"))
+        == PROFILE_AEROSPACE
+    )
+    return [
+        job
+        for job in jobs
+        if is_us_job(job)
+        and (
+            predicate(job["title"])
+            or (
+                include_hardware
+                and is_internship_title(job["title"])
+                and any(
+                    keyword in job["title"].lower()
+                    for keyword in ("hardware", "manufacturing")
+                )
+            )
+        )
+    ]

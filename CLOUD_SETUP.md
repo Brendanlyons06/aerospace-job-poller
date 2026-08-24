@@ -48,8 +48,8 @@ normal Gmail password.
 5. Run it again with `poll` selected.
 6. Open the run log. A healthy first poll includes:
    - `database backend: postgresql`
-   - results for the 14 pilot companies
-   - a final `polled .../14 companies` summary
+   - results for the 50 enabled companies
+   - a final `polled .../50 companies` summary
 7. After both manual tests pass, return to **Settings → Secrets and variables
    → Actions**, open the **Variables** tab, and create `POLLER_ENABLED` with
    the value `true`. This activates the hourly schedule.

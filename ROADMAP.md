@@ -10,7 +10,7 @@ are introduced only when usage or SMS delivery requires them.
 - Durable job deduplication and notification retries
 - Gmail alerts and optional disabled-by-default SMS support
 - Per-company health monitoring and weekly summaries
-- 31 relevant adapters, with a validated 14-company installed pilot
+- 50 relevant adapters enabled in the free cloud poller
 - Local macOS scheduler and private GitHub repository
 
 ## Phase 1 — free cloud poller
@@ -34,13 +34,19 @@ Implemented with backward-compatible SQLite upgrades and Supabase migration
 successful polls no longer return it, limiting false closures from transient
 career-board inconsistencies.
 
-## Phase 3 — company expansion
+## Phase 3 — company expansion — complete
 
 - Validate and enable the 17 existing relevant adapters outside the pilot
 - Add major aerospace/defense employers
 - Add high-priority new-space companies
 - Add aircraft, industrial, laboratory, and government sources
 - Prefer 50–60 reliable sources before chasing complete list coverage
+
+The enabled set now contains 50 official sources. It combines the original
+14-company pilot, the 17 previously inactive aerospace adapters, and 19 new
+adapters across defense, spacecraft, aircraft, and advanced manufacturing.
+New sources are baseline-seeded before they can alert, preventing a backlog
+of already-open internships from being emailed during the expansion.
 
 ## Phase 4 — searchable dashboard
 

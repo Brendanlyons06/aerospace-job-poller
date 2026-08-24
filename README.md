@@ -18,13 +18,12 @@ this version.
   rollback option.
 - Sends Gmail alerts for newly discovered matching postings.
 - Supports optional Twilio SMS alerts, disabled by default.
-- Has 31 aerospace-profile adapters; the installed pilot enables 14 companies.
+- Has 50 enabled aerospace-profile adapters using official career sources.
 - Stores dashboard-ready sectors, disciplines, lifecycle dates, structured
   locations, work modes, and source-published compensation/date metadata.
-- Passed 54 deterministic tests and live two-pass adapter validation when this
-  version was prepared.
+- Passes deterministic tests and live two-pass adapter validation.
 
-The installed pilot watches:
+The enabled set includes:
 
 - SpaceX
 - Blue Origin
@@ -40,6 +39,13 @@ The installed pilot watches:
 - AeroVironment
 - Joby Aviation
 - BETA Technologies
+- RTX, BAE Systems, Leidos, Anduril, Shield AI, and Stoke Space
+- Varda, K2 Space, The Aerospace Corporation, Zipline, and Astranis
+- Epirus, CACI, Mach Industries, Skydio, Hadrian, and Saronic
+- Planet Labs, Archer Aviation, Muon Space, Machina Labs, and Gravitics
+- Northwood Space, Axiom Space, Loft Orbital, Wisk Aero, and Boom Supersonic
+- Sierra Nevada Corporation, Moog, Curtiss-Wright, and Applied Materials
+- ispace, Apple Hardware Engineering, Caterpillar, Astrolab, and Starpath
 
 The complete target manifest is maintained in [`profiles.py`](profiles.py).
 
@@ -169,7 +175,7 @@ adapter contract.
 
 ## Free cloud schedule
 
-The checked-in GitHub Actions workflow runs the 14-company pilot hourly at
+The checked-in GitHub Actions workflow runs all 50 enabled sources hourly at
 17 minutes past the hour. It uses Supabase PostgreSQL for durable state and
 refuses to poll if the database secret is missing, preventing accidental use
 of a temporary runner-local database.

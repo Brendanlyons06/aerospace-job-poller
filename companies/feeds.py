@@ -262,6 +262,53 @@ def impulse_space_internships_us(*, title_filter=None) -> list[dict]:
     return jobs
 
 
+def pinpoint_internships_us(
+    board_host: str,
+    *,
+    title_filter=None,
+) -> list[dict]:
+    """Read the public JSON feed behind a Pinpoint-hosted careers board."""
+    payload = http.get_json(f"https://{board_host}/postings.json")
+    predicate = title_filter or is_swe_ml_title
+    jobs = []
+    for posting in payload.get("data", []):
+        title = posting.get("title", "")
+        if not is_internship_title(title) or not predicate(title):
+            continue
+        location = posting.get("location") or {}
+        label = location.get("name") or ", ".join(
+            value
+            for value in (location.get("city"), location.get("province"))
+            if value
+        )
+        if not label or not is_us_location(label):
+            continue
+        jobs.append(
+            _add_optional(
+                {
+                    "id": str(posting["id"]),
+                    "title": title,
+                    "locations": [label],
+                    "url": posting["url"],
+                },
+                posted_at=posting.get("published_at"),
+                closes_at=posting.get("deadline_at"),
+                employment_type=posting.get("employment_type_text")
+                or posting.get("employment_type"),
+                work_mode=posting.get("workplace_type"),
+                compensation={
+                    "min": posting.get("compensation_minimum"),
+                    "max": posting.get("compensation_maximum"),
+                    "currency": posting.get("compensation_currency"),
+                    "period": posting.get("compensation_frequency"),
+                }
+                if posting.get("compensation_visible")
+                else None,
+            )
+        )
+    return jobs
+
+
 def _icims_location_label(value: str) -> str:
     """Turn iCIMS labels such as ``US-CA-Marina`` into readable locations."""
     value = value.strip()

@@ -129,9 +129,8 @@ AEROSPACE_TARGET_COMPANIES = frozenset(
 )
 
 
-# Adapters already present in the repository that match the supplied target
-# manifest.  This set is intentionally small and explicit: adding an adapter
-# is a code change, while the manifest above can be edited as a watchlist.
+# Adapters present in the repository that match the supplied target manifest.
+# This stays explicit so adapter coverage changes remain reviewable.
 AEROSPACE_ADAPTER_COMPANIES = frozenset(
     {
         "Northrop Grumman",
@@ -165,6 +164,25 @@ AEROSPACE_ADAPTER_COMPANIES = frozenset(
         "Skydio",
         "Hadrian",
         "Saronic",
+        "Planet Labs",
+        "Archer Aviation",
+        "Muon Space",
+        "Machina Labs",
+        "Gravitics",
+        "Northwood Space",
+        "Axiom Space",
+        "Loft Orbital",
+        "Wisk Aero",
+        "Boom Supersonic",
+        "Sierra Nevada Corporation",
+        "Moog",
+        "Curtiss-Wright",
+        "Applied Materials",
+        "Apple Hardware Engineering",
+        "Caterpillar",
+        "Astrolab",
+        "Starpath",
+        "ispace",
     }
 )
 

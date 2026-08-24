@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import sqlite3
 import sys
 import tempfile
@@ -48,6 +49,7 @@ job_metadata = importlib.import_module(f"{PACKAGE}.job_metadata")
 imc = importlib.import_module(f"{PACKAGE}.companies.imc")
 meta_client = importlib.import_module(f"{PACKAGE}.companies.metacareers.client")
 notify = importlib.import_module(f"{PACKAGE}.notify")
+profiles = importlib.import_module(f"{PACKAGE}.profiles")
 rippling = importlib.import_module(f"{PACKAGE}.companies.rippling")
 rippling_client = importlib.import_module(f"{PACKAGE}.companies.rippling.client")
 watch = importlib.import_module(f"{PACKAGE}.watch")
@@ -383,6 +385,52 @@ class FeedNormalizationTests(unittest.TestCase):
             jobs = feeds.official_page_jobs("https://careers.example/openings", r"/jobs/(\d+)")
         self.assertEqual(jobs, [job("123", "Software Intern") | {"locations": [], "url": "https://careers.example/jobs/123"}])
 
+    def test_pinpoint_uses_structured_us_location_and_source_metadata(self) -> None:
+        payload = {
+            "data": [
+                {
+                    "id": 501840,
+                    "title": "LTVS Systems Engineering Intern",
+                    "location": {"name": "Hawthorne, California"},
+                    "url": "https://example.pinpointhq.com/postings/abc",
+                    "deadline_at": "2026-10-01T00:00:00Z",
+                    "employment_type_text": "Internship",
+                    "workplace_type": "onsite",
+                },
+                {
+                    "id": 2,
+                    "title": "Systems Engineering Intern",
+                    "location": {"name": "Toronto, Ontario"},
+                    "url": "https://example.pinpointhq.com/postings/foreign",
+                },
+                {
+                    "id": 3,
+                    "title": "Product Design Intern",
+                    "location": {"name": "Austin, Texas"},
+                    "url": "https://example.pinpointhq.com/postings/irrelevant",
+                },
+            ]
+        }
+        with patch.object(feeds.http, "get_json", return_value=payload):
+            jobs = feeds.pinpoint_internships_us(
+                "example.pinpointhq.com",
+                title_filter=filters.is_aerospace_mechanical_title,
+            )
+        self.assertEqual(
+            jobs,
+            [
+                {
+                    "id": "501840",
+                    "title": "LTVS Systems Engineering Intern",
+                    "locations": ["Hawthorne, California"],
+                    "url": "https://example.pinpointhq.com/postings/abc",
+                    "closes_at": "2026-10-01T00:00:00Z",
+                    "employment_type": "Internship",
+                    "work_mode": "onsite",
+                }
+            ],
+        )
+
     def test_clearcompany_paginates_and_uses_structured_us_locations(self) -> None:
         first = {
             "results": [
@@ -613,6 +661,20 @@ class MetaClientTests(unittest.TestCase):
 
 
 class AdapterContractTests(unittest.TestCase):
+    def test_phase_three_workflow_enables_the_50_adapter_manifest(self) -> None:
+        workflow = (PROJECT_ROOT / ".github/workflows/hourly-poller.yml").read_text()
+        match = re.search(r"^\s*JOB_POLLER_COMPANIES:\s*(\S+)$", workflow, re.MULTILINE)
+        self.assertIsNotNone(match)
+        slugs = match.group(1).split(",")
+        self.assertEqual(len(slugs), 50)
+        self.assertEqual(len(set(slugs)), 50)
+        enabled_names = {
+            importlib.import_module(f"{PACKAGE}.companies.{slug}").COMPANY_NAME
+            for slug in slugs
+        }
+        self.assertEqual(enabled_names, profiles.AEROSPACE_ADAPTER_COMPANIES)
+        self.assertTrue(enabled_names.issubset(profiles.AEROSPACE_TARGET_COMPANIES))
+
     def test_every_discovered_adapter_declares_the_fetch_contract(self) -> None:
         self.assertGreaterEqual(len(companies_module.COMPANIES), 1)
         for company in companies_module.COMPANIES:
