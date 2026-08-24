@@ -9,11 +9,11 @@ on:
       mode:
         description: Choose a real poll or a notification-only test
         required: true
-        default: poll
+        default: test-notification
         type: choice
         options:
-          - poll
           - test-notification
+          - poll
 
 concurrency:
   group: aerospace-job-poller
@@ -44,12 +44,12 @@ jobs:
 
     steps:
       - name: Check out the private repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: job-poller
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip

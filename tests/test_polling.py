@@ -841,6 +841,21 @@ class DatabaseConfigurationTests(unittest.TestCase):
             ("Example", "123"),
         )
 
+    def test_supabase_pooler_requires_project_reference_in_username(self) -> None:
+        invalid_url = (
+            "postgresql://postgres:encoded-password@"
+            "aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+        )
+        with self.assertRaisesRegex(RuntimeError, "postgres.<project-reference>"):
+            db._validate_database_url_shape(invalid_url)
+
+    def test_supabase_transaction_pooler_shape_is_accepted(self) -> None:
+        valid_url = (
+            "postgresql://postgres.projectref:encoded-password@"
+            "aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+        )
+        db._validate_database_url_shape(valid_url)
+
     def test_postgres_migration_enables_row_level_security(self) -> None:
         migration = (
             PROJECT_ROOT / "supabase" / "migrations" / "001_poller_state.sql"
@@ -857,6 +872,9 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("vars.POLLER_ENABLED == 'true'", workflow)
         self.assertIn("JOB_POLLER_REQUIRE_POSTGRES: \"true\"", workflow)
         self.assertIn("secrets.SUPABASE_DATABASE_URL", workflow)
+        self.assertIn("default: test-notification", workflow)
+        self.assertIn("actions/checkout@v6", workflow)
+        self.assertIn("actions/setup-python@v6", workflow)
 
     def test_postgres_style_queries_preserve_dedup_and_outbox_behavior(self) -> None:
         class PostgresStyleConnection:

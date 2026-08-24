@@ -19,7 +19,7 @@ this version.
 - Sends Gmail alerts for newly discovered matching postings.
 - Supports optional Twilio SMS alerts, disabled by default.
 - Has 31 aerospace-profile adapters; the installed pilot enables 14 companies.
-- Passed 46 deterministic tests and live two-pass adapter validation when this
+- Passed 48 deterministic tests and live two-pass adapter validation when this
   version was prepared.
 
 The installed pilot watches:

@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -94,6 +95,33 @@ def backend_name() -> str:
     return "postgresql" if _database_url() else "sqlite"
 
 
+def _validate_database_url_shape(database_url: str) -> None:
+    """Catch common Supabase copy/paste mistakes without exposing the URL."""
+    if "[YOUR-PASSWORD]" in database_url:
+        raise RuntimeError(
+            "Replace [YOUR-PASSWORD] in the Supabase connection string"
+        )
+    try:
+        parsed = urlsplit(database_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(
+            "The Supabase connection string is malformed; recopy it from Connect"
+        ) from exc
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise RuntimeError("The database secret must be a PostgreSQL connection string")
+    if parsed.hostname and parsed.hostname.endswith(".pooler.supabase.com"):
+        if not (parsed.username or "").startswith("postgres."):
+            raise RuntimeError(
+                "The Supabase shared-pooler username must be "
+                "postgres.<project-reference>; recopy the Transaction pooler URI"
+            )
+        if port != 6543:
+            raise RuntimeError(
+                "The Supabase Transaction pooler URI must use port 6543"
+            )
+
+
 def _migration_statements(contents: str) -> list[str]:
     """Split the deliberately simple SQL migration files into statements."""
     return [statement.strip() for statement in contents.split(";") if statement.strip()]
@@ -142,6 +170,7 @@ def _postgres_connect():
     database_url = _database_url()
     if not database_url:
         raise RuntimeError("JOB_POLLER_DATABASE_URL is not configured")
+    _validate_database_url_shape(database_url)
 
     if (
         _POSTGRES_CONNECTION is not None
