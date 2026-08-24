@@ -28,7 +28,7 @@ sys.path[:] = [
 if str(PROJECT_PARENT) not in sys.path:
     sys.path.insert(0, str(PROJECT_PARENT))
 
-PACKAGE = "Job-poller"
+PACKAGE = PROJECT_ROOT.name
 check = importlib.import_module(f"{PACKAGE}.check")
 companies_module = importlib.import_module(f"{PACKAGE}.companies")
 filters = importlib.import_module(f"{PACKAGE}.filters")

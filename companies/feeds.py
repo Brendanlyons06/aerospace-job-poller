@@ -83,6 +83,197 @@ def official_page_jobs(
     return jobs
 
 
+def _clean_html_text(value: str) -> str:
+    """Return the visible text from a small careers-page HTML fragment."""
+    return re.sub(
+        r"\s+",
+        " ",
+        html.unescape(re.sub(r"<[^>]+>", " ", value)),
+    ).strip()
+
+
+def clearcompany_internships_us(
+    site_id: str,
+    *,
+    title_filter=None,
+) -> list[dict]:
+    """Read the public ClearCompany widget used by an official careers page."""
+    endpoint = f"https://careers-api.clearcompany.com/v1/{site_id}"
+    jobs = []
+    page_index = 0
+    page_size = 100
+    predicate = title_filter or is_swe_ml_title
+    with http.session() as session:
+        while True:
+            response = session.get(
+                endpoint,
+                params={
+                    "pageIndex": page_index,
+                    "pageSize": page_size,
+                    "source": "CJB-0",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            page = payload.get("results", [])
+            for posting in page:
+                title = posting.get("positionTitle", "")
+                if not is_internship_title(title) or not predicate(title):
+                    continue
+                locations = []
+                for location in posting.get("locations") or []:
+                    if not isinstance(location, dict):
+                        continue
+                    country = location.get("country")
+                    if country not in {"US", "USA", "United States"}:
+                        continue
+                    label = ", ".join(
+                        value
+                        for value in (
+                            location.get("city"),
+                            location.get("subdivision"),
+                        )
+                        if value
+                    )
+                    locations.append(label or "United States")
+                if not locations:
+                    fallback = posting.get("location")
+                    if isinstance(fallback, str) and is_us_location(fallback):
+                        locations = [fallback]
+                if not locations:
+                    continue
+                job_id = posting.get("id")
+                url = posting.get("applyLink")
+                if job_id and url:
+                    jobs.append(
+                        {
+                            "id": str(job_id),
+                            "title": title,
+                            "locations": list(dict.fromkeys(locations)),
+                            "url": url,
+                        }
+                    )
+            page_index += 1
+            total = int(payload.get("totalCount") or len(page))
+            if not page or page_index * page_size >= total:
+                break
+    return jobs
+
+
+def impulse_space_internships_us(*, title_filter=None) -> list[dict]:
+    """Read the Pinpoint postings embedded in Impulse Space's careers page."""
+    careers_url = "https://www.impulsespace.com/careers"
+    with http.session() as session:
+        response = session.get(careers_url)
+        response.raise_for_status()
+        page = response.text
+    match = re.search(
+        r'<script\s+id=["\']__NEXT_DATA__["\']\s+type=["\']application/json["\']>'
+        r"(.*?)</script>",
+        page,
+        re.DOTALL,
+    )
+    if not match:
+        raise ValueError("Impulse Space careers page has no __NEXT_DATA__ payload")
+    payload = json.loads(html.unescape(match.group(1)))
+    postings = payload["props"]["pageProps"]["jobPostings"]["data"]
+    predicate = title_filter or is_swe_ml_title
+    jobs = []
+    for posting in postings:
+        title = posting.get("title", "")
+        if not is_internship_title(title) or not predicate(title):
+            continue
+        location = posting.get("location") or {}
+        label = ", ".join(
+            dict.fromkeys(
+                value.strip()
+                for value in (
+                    location.get("name"),
+                    location.get("province"),
+                )
+                if isinstance(value, str) and value.strip()
+            )
+        )
+        if not is_us_location(label):
+            continue
+        url = posting.get("url")
+        id_match = re.search(r"/postings/([0-9a-f-]+)", url or "", re.IGNORECASE)
+        if id_match:
+            jobs.append(
+                {
+                    "id": id_match.group(1),
+                    "title": title,
+                    "locations": [label],
+                    "url": url,
+                }
+            )
+    return jobs
+
+
+def _icims_location_label(value: str) -> str:
+    """Turn iCIMS labels such as ``US-CA-Marina`` into readable locations."""
+    value = value.strip()
+    match = re.fullmatch(r"US-([A-Z]{2})-(.+)", value, re.IGNORECASE)
+    if not match:
+        return value
+    city = match.group(2).replace("-", " ")
+    return f"{city}, {match.group(1).upper()}, United States"
+
+
+def icims_internships_us(
+    careers_host: str,
+    *,
+    title_filter=None,
+) -> list[dict]:
+    """Read a public iCIMS keyword search rendered by the official job site."""
+    search_url = f"https://{careers_host}/jobs/search"
+    with http.session() as session:
+        response = session.get(
+            search_url,
+            params={"ss": 1, "searchKeyword": "intern", "in_iframe": 1},
+        )
+        response.raise_for_status()
+        page = response.text
+    predicate = title_filter or is_swe_ml_title
+    jobs = []
+    cards = re.findall(
+        r'<li\b[^>]*class=["\'][^"\']*iCIMS_JobCardItem[^"\']*["\'][^>]*>'
+        r"(.*?)</li>",
+        page,
+        re.IGNORECASE | re.DOTALL,
+    )
+    for card in cards:
+        link = re.search(
+            r'<a\b[^>]*href=["\']([^"\']*/jobs/(\d+)/[^"\']+)["\'][^>]*>'
+            r"(.*?)</a>",
+            card,
+            re.IGNORECASE | re.DOTALL,
+        )
+        location = re.search(
+            r"Job Locations</span>\s*<span[^>]*>(.*?)</span>",
+            card,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not link or not location:
+            continue
+        title_match = re.search(r"<h3[^>]*>(.*?)</h3>", link.group(3), re.DOTALL)
+        title = _clean_html_text(title_match.group(1) if title_match else link.group(3))
+        if not is_internship_title(title) or not predicate(title):
+            continue
+        location_label = _icims_location_label(_clean_html_text(location.group(1)))
+        if not is_us_location(location_label):
+            continue
+        jobs.append(
+            {
+                "id": link.group(2),
+                "title": title,
+                "locations": [location_label],
+                "url": html.unescape(link.group(1)),
+            }
+        )
+    return jobs
+
+
 LEVER_URL = "https://api.lever.co/v0/postings/{token}?mode=json"
 
 
@@ -128,11 +319,14 @@ def lever_jobs(
     return jobs
 
 
-def lever_internships_us(board_token: str) -> list[dict]:
-    """US SWE/ML internships using Lever's own commitment and location fields."""
-    return swe_ml_jobs(
-        lever_jobs(board_token, commitment="Intern", country="United States")
-    )
+def lever_internships_us(board_token: str, *, title_filter=None) -> list[dict]:
+    """US internships using Lever's own commitment and location fields.
+
+    ``title_filter`` lets a profile reuse the structured board filters while
+    choosing a domain-specific title vocabulary.
+    """
+    jobs = lever_jobs(board_token, commitment="Intern", country="United States")
+    return [job for job in jobs if (title_filter or is_swe_ml_title)(job["title"])]
 
 
 def greenhouse_jobs(board: str, *, content: bool = False) -> list[dict]:
@@ -202,7 +396,7 @@ def _greenhouse_us_office_ids(board: str) -> list[int]:
     return [office["id"] for office in offices if office.get("id") and is_us_office(office)]
 
 
-def greenhouse_internships_us(board: str) -> list[dict]:
+def greenhouse_internships_us(board: str, *, title_filter=None) -> list[dict]:
     """Use Greenhouse's hosted internship and Location filters when available.
 
     The modern Greenhouse board submits ``field_<id>[]`` and ``offices[]``
@@ -262,7 +456,9 @@ def greenhouse_internships_us(board: str) -> list[dict]:
                     else f"{location}, United States"
                     for location in job["locations"]
                 ]
-        return swe_ml_jobs(list({job["id"]: job for job in jobs}.values()))
+        jobs = list({job["id"]: job for job in jobs}.values())
+        predicate = title_filter or is_swe_ml_title
+        return [job for job in jobs if predicate(job["title"])]
     except (
         KeyError,
         TypeError,
@@ -270,7 +466,15 @@ def greenhouse_internships_us(board: str) -> list[dict]:
         json.JSONDecodeError,
         requests.exceptions.RequestException,
     ):
-        return internships_in_us(greenhouse_jobs(board, content=True))
+        jobs = greenhouse_jobs(board, content=True)
+        predicate = title_filter or is_swe_ml_title
+        return [
+            job
+            for job in jobs
+            if is_internship_title(job["title"])
+            and predicate(job["title"])
+            and any(is_us_location(location) for location in job["locations"])
+        ]
 
 
 def workday_jobs(
@@ -340,6 +544,7 @@ def workday_internships_us(
     site: str,
     *,
     host: str = "wd5",
+    title_filter=None,
 ) -> list[dict]:
     """Discover and apply a Workday site's live Job Type and U.S. facets."""
     endpoint = (
@@ -399,9 +604,15 @@ def workday_internships_us(
                 break
 
     if not applied:
-        return internships_in_us(
-            workday_jobs(tenant, site, host=host, search_text="intern")
-        )
+        jobs = workday_jobs(tenant, site, host=host, search_text="intern")
+        predicate = title_filter or is_swe_ml_title
+        return [
+            job
+            for job in jobs
+            if is_internship_title(job["title"])
+            and predicate(job["title"])
+            and any(is_us_location(location) for location in job["locations"])
+        ]
     jobs = workday_jobs(
         tenant,
         site,
@@ -431,7 +642,8 @@ def workday_internships_us(
                 else f"{location}, United States"
                 for location in job["locations"]
             ]
-    return swe_ml_jobs(jobs)
+    predicate = title_filter or is_swe_ml_title
+    return [job for job in jobs if predicate(job["title"])]
 
 
 def amazon_jobs() -> list[dict]:
@@ -726,9 +938,17 @@ def google_technical_internships(jobs: list[dict]) -> list[dict]:
     ]
 
 
-def phenom_internships_us(careers_url: str) -> list[dict]:
+def phenom_internships_us(careers_url: str, *, title_filter=None) -> list[dict]:
     """Use Phenom's official internship search, validating its country field."""
-    return internships_in_us(phenom_jobs(careers_url))
+    jobs = phenom_jobs(careers_url)
+    predicate = title_filter or is_swe_ml_title
+    return [
+        job
+        for job in jobs
+        if is_internship_title(job["title"])
+        and predicate(job["title"])
+        and any(is_us_location(location) for location in job["locations"])
+    ]
 
 
 def phenom_jobs(careers_url: str) -> list[dict]:
@@ -814,7 +1034,12 @@ def _ashby_location_is_us(location: dict) -> bool:
     return country in {"US", "USA", "United States", "United States of America"}
 
 
-def ashby_internships_us(board: str, *, require_swe_ml: bool = True) -> list[dict]:
+def ashby_internships_us(
+    board: str,
+    *,
+    require_swe_ml: bool = True,
+    title_filter=None,
+) -> list[dict]:
     """Mirror Ashby's UI filters using its exact structured posting fields.
 
     Ashby's public job-board UI filters the downloaded payload in the browser;
@@ -858,7 +1083,10 @@ def ashby_internships_us(board: str, *, require_swe_ml: bool = True) -> list[dic
                 "url": job.get("jobUrl") or job.get("applyUrl"),
             }
         )
-    return swe_ml_jobs(jobs) if require_swe_ml else jobs
+    if not require_swe_ml:
+        return jobs
+    predicate = title_filter or is_swe_ml_title
+    return [job for job in jobs if predicate(job["title"])]
 
 
 def eightfold_jobs(host: str, domain: str, *, query: str = "intern") -> list[dict]:

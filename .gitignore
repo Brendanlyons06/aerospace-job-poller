@@ -6,6 +6,7 @@
 jobs.db
 *.db-journal
 .sms_opt_in_sent
+.job-poller.lock
 logs/
 
 # Python build/runtime artifacts

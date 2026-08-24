@@ -9,9 +9,11 @@ auto-discovered.
 Fetching is concurrent, everything after it is not — see MAX_WORKERS.
 """
 
+import fcntl
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from . import db, notify, observability
 from .companies import COMPANIES
@@ -26,6 +28,31 @@ from .companies import COMPANIES
 # 2MB scales that 148MB figure linearly, into OOM range on a 1GB box.
 # Raise this only if you hit a real wall-clock wall, never for tidiness.
 MAX_WORKERS = 12
+LOCK_PATH = Path(__file__).resolve().parent / ".job-poller.lock"
+
+
+def _send_health_message(subject: str, body: str) -> bool:
+    """Send health mail without allowing it to stop normal job polling."""
+    try:
+        notify.notify_system_message(subject, body)
+        return True
+    except Exception as exc:
+        print(f"HEALTH ALERT FAILED: {type(exc).__name__}: {exc}")
+        return False
+
+
+def _weekly_health_body() -> str:
+    rows = db.health_snapshot()
+    lines = ["Weekly aerospace job-poller status", ""]
+    for row in rows:
+        if row["consecutive_failures"]:
+            status = f"FAILING ({row['consecutive_failures']} consecutive polls)"
+        else:
+            status = f"healthy, {row['last_job_count'] or 0} matching jobs"
+        if row["consecutive_zero"]:
+            status += f", zero-match streak {row['consecutive_zero']}"
+        lines.append(f"{row['company']}: {status}")
+    return "\n".join(lines)
 
 
 def _fetch(company, run_id: str | None = None) -> list[dict]:
@@ -57,7 +84,8 @@ def _fetch(company, run_id: str | None = None) -> list[dict]:
         observability.reset_context(context)
 
 
-def run() -> None:
+def _run_once() -> None:
+    notify.validate_configuration()
     notify.ensure_opted_in()
     started = time.monotonic()
     run_id = uuid.uuid4().hex
@@ -74,12 +102,31 @@ def run() -> None:
                 # One rotted persisted-query id or dead career site must not
                 # take down the other 99 companies' polls.
                 failures.append(company.COMPANY_NAME)
+                error = f"{type(exc).__name__}: {exc}"
+                failure_count, should_alert = db.record_poll_failure(
+                    company.COMPANY_NAME, error
+                )
                 print(f"[{company.COMPANY_NAME}] FETCH FAILED: {type(exc).__name__}: {exc}")
+                if should_alert:
+                    _send_health_message(
+                        f"Job poller warning: {company.COMPANY_NAME} is failing",
+                        f"{company.COMPANY_NAME} has failed {failure_count} consecutive "
+                        f"polls.\n\nLatest error:\n{error}",
+                    )
 
     # ...but diff and alert serially on the main thread. sqlite doesn't want
     # concurrent writers to one file, Twilio rate-limits, and both legs are
     # fast enough that there's nothing to win by parallelizing them.
     for company, jobs in results.items():
+        recovered, _zero_count = db.record_poll_success(
+            company.COMPANY_NAME, len(jobs)
+        )
+        if recovered:
+            _send_health_message(
+                f"Job poller recovered: {company.COMPANY_NAME}",
+                f"{company.COMPANY_NAME} is responding again and returned "
+                f"{len(jobs)} matching jobs.",
+            )
         new_jobs = db.sync_and_get_new(company.COMPANY_NAME, jobs)
         observability.log_event(
             company.COMPANY_NAME,
@@ -91,16 +138,49 @@ def run() -> None:
 
         for job in new_jobs:
             print(f"[{company.COMPANY_NAME}] new: {job['title']} ({', '.join(job['locations'])})")
-            notify.notify_new_job(company.COMPANY_NAME, job)
+            try:
+                notify.notify_new_job(company.COMPANY_NAME, job)
+            except Exception as exc:
+                db.mark_notification_failed(
+                    company.COMPANY_NAME,
+                    job["id"],
+                    f"{type(exc).__name__}: {exc}",
+                )
+                print(
+                    f"[{company.COMPANY_NAME}] ALERT FAILED; will retry: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                db.mark_notification_delivered(company.COMPANY_NAME, job["id"])
 
         if not new_jobs:
             print(f"[{company.COMPANY_NAME}] no new postings ({len(jobs)} match filters)")
+
+    if db.weekly_summary_due():
+        if _send_health_message(
+            "Weekly aerospace job-poller status", _weekly_health_body()
+        ):
+            db.mark_weekly_summary_sent()
 
     elapsed = time.monotonic() - started
     summary = f"polled {len(results)}/{len(COMPANIES)} companies in {elapsed:.1f}s"
     if failures:
         summary += f" — failed: {', '.join(failures)}"
     print(summary)
+
+
+def run() -> None:
+    """Run one poll, or skip cleanly when another poll is already active."""
+    with LOCK_PATH.open("w") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("another poll is already running; skipped this interval")
+            return
+        try:
+            _run_once()
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 if __name__ == "__main__":

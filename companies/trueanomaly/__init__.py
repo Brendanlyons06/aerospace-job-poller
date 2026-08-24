@@ -1,11 +1,11 @@
 from ...profiles import role_title_filter
 from ..feeds import greenhouse_internships_us
 
-COMPANY_NAME = "Varda Space Industries"
-CAREERS_URL = "https://job-boards.greenhouse.io/vardaspace"
+COMPANY_NAME = "True Anomaly"
+CAREERS_URL = "https://job-boards.greenhouse.io/trueanomalyinc"
 
 
 def fetch_jobs() -> list[dict]:
     return greenhouse_internships_us(
-        "vardaspace", title_filter=role_title_filter()
+        "trueanomalyinc", title_filter=role_title_filter()
     )

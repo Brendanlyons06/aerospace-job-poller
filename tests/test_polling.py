@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -35,7 +36,7 @@ sys.path[:] = [
 if str(PROJECT_PARENT) not in sys.path:
     sys.path.insert(0, str(PROJECT_PARENT))
 
-PACKAGE = "Job-poller"
+PACKAGE = PROJECT_ROOT.name
 ats = importlib.import_module(f"{PACKAGE}.ats")
 check = importlib.import_module(f"{PACKAGE}.check")
 companies_module = importlib.import_module(f"{PACKAGE}.companies")
@@ -379,6 +380,117 @@ class FeedNormalizationTests(unittest.TestCase):
             jobs = feeds.official_page_jobs("https://careers.example/openings", r"/jobs/(\d+)")
         self.assertEqual(jobs, [job("123", "Software Intern") | {"locations": [], "url": "https://careers.example/jobs/123"}])
 
+    def test_clearcompany_paginates_and_uses_structured_us_locations(self) -> None:
+        first = {
+            "results": [
+                {
+                    "id": "mechanical",
+                    "positionTitle": "Mechanical Engineering Intern",
+                    "locations": [
+                        {"city": "Cedar Park", "subdivision": "TX", "country": "US"}
+                    ],
+                    "applyLink": "https://job/mechanical",
+                },
+                {
+                    "id": "foreign",
+                    "positionTitle": "Propulsion Engineering Intern",
+                    "locations": [
+                        {"city": "Toronto", "subdivision": "ON", "country": "CA"}
+                    ],
+                    "applyLink": "https://job/foreign",
+                },
+            ],
+            "totalCount": 101,
+        }
+        second = {
+            "results": [
+                {
+                    "id": "quality",
+                    "positionTitle": "Quality Engineering Intern",
+                    "locations": [
+                        {"city": "Austin", "subdivision": "TX", "country": "US"}
+                    ],
+                    "applyLink": "https://job/quality",
+                }
+            ],
+            "totalCount": 101,
+        }
+        session = FakeSession(
+            get_responses=[FakeResponse(payload=first), FakeResponse(payload=second)]
+        )
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.clearcompany_internships_us(
+                "site", title_filter=filters.is_aerospace_mechanical_title
+            )
+        self.assertEqual([item["id"] for item in jobs], ["mechanical", "quality"])
+        self.assertEqual(jobs[0]["locations"], ["Cedar Park, TX"])
+        self.assertEqual(session.get_calls[1][1]["params"]["pageIndex"], 1)
+
+    def test_impulse_reads_embedded_pinpoint_jobs(self) -> None:
+        postings = {
+            "props": {
+                "pageProps": {
+                    "jobPostings": {
+                        "data": [
+                            {
+                                "title": "Thermal Engineering Intern",
+                                "url": "https://impulsespace.pinpointhq.com/en/postings/abc-123",
+                                "location": {
+                                    "name": "Redondo Beach",
+                                    "province": "California",
+                                },
+                            },
+                            {
+                                "title": "Mechanical Engineering Intern",
+                                "url": "https://impulsespace.pinpointhq.com/en/postings/foreign-1",
+                                "location": {"name": "Toronto", "province": "Ontario"},
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+        page = (
+            '<script id="__NEXT_DATA__" type="application/json">'
+            f"{json.dumps(postings)}"
+            "</script>"
+        )
+        session = FakeSession(get_responses=[FakeResponse(text=page)])
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.impulse_space_internships_us(
+                title_filter=filters.is_aerospace_mechanical_title
+            )
+        self.assertEqual([item["id"] for item in jobs], ["abc-123"])
+        self.assertEqual(jobs[0]["locations"], ["Redondo Beach, California"])
+
+    def test_icims_normalizes_us_location_and_filters_false_keyword_hits(self) -> None:
+        def card(job_id: str, title: str, location: str) -> str:
+            return f"""
+                <li class="iCIMS_JobCardItem"><div>
+                  <span class="sr-only field-label">Job Locations</span>
+                  <span>{location}</span>
+                  <a href="https://careers.example/jobs/{job_id}/role/job?in_iframe=1">
+                    <h3>{title}</h3>
+                  </a>
+                </div></li>
+            """
+
+        page = "".join(
+            [
+                card("12", "Flight Test Intern", "US-CA-Marina"),
+                card("13", "Software Engineering Intern", "US-CA-Marina"),
+                card("14", "Mechanical Engineering Intern", "CA-ON-Toronto"),
+            ]
+        )
+        session = FakeSession(get_responses=[FakeResponse(text=page)])
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.icims_internships_us(
+                "careers.example",
+                title_filter=filters.is_aerospace_mechanical_title,
+            )
+        self.assertEqual([item["id"] for item in jobs], ["12"])
+        self.assertEqual(jobs[0]["locations"], ["Marina, CA, United States"])
+
     def test_eightfold_paginates_and_reflows_packed_locations(self) -> None:
         first = FakeResponse(payload={"count": 2, "positions": [
             {
@@ -582,6 +694,32 @@ class AdapterContractTests(unittest.TestCase):
             ["state", "country"],
         )
 
+    def test_aerospace_classifier_and_generic_company_exception(self) -> None:
+        accepted = [
+            "Mechanical Engineering Intern",
+            "Systems Engineering Intern",
+            "Flight Test Engineering Co-op",
+            "GNC Intern",
+            "Manufacturing Engineering Intern",
+        ]
+        for title in accepted:
+            with self.subTest(title=title):
+                self.assertTrue(filters.is_aerospace_mechanical_title(title))
+
+        self.assertFalse(
+            filters.is_aerospace_mechanical_title("Flight Software Engineering Intern")
+        )
+        self.assertTrue(
+            filters.is_generic_engineering_internship_title(
+                "Summer 2027 Engineering Internship/Co-op"
+            )
+        )
+        self.assertFalse(
+            filters.is_generic_engineering_internship_title(
+                "Summer 2027 Civil Engineering Internship"
+            )
+        )
+
     def test_checker_rejects_duplicate_or_malformed_poll_results(self) -> None:
         errors = check._validate([
             job("same"),
@@ -615,6 +753,13 @@ class DatabaseDiffTests(unittest.TestCase):
             db.sync_and_get_new("Example", [existing, newly_posted]),
             [newly_posted],
         )
+        # Until delivery is acknowledged, a later poll returns the durable
+        # outbox item again instead of silently losing the alert.
+        self.assertEqual(
+            db.sync_and_get_new("Example", [existing, newly_posted]),
+            [newly_posted],
+        )
+        db.mark_notification_delivered("Example", newly_posted["id"])
         self.assertEqual(db.sync_and_get_new("Example", [existing, newly_posted]), [])
 
         connection = db._connect()
@@ -626,6 +771,44 @@ class DatabaseDiffTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertEqual(stored_ids, [("existing",), ("new",)])
+
+    def test_failed_notification_stays_pending_with_attempt_metadata(self) -> None:
+        existing = job("existing")
+        newly_posted = job("new", "Mechanical Engineering Intern")
+        db.sync_and_get_new("Example", [existing])
+        self.assertEqual(db.sync_and_get_new("Example", [existing, newly_posted]), [newly_posted])
+
+        db.mark_notification_failed("Example", "new", "SMTP temporarily unavailable")
+        self.assertEqual(db.sync_and_get_new("Example", [existing]), [newly_posted])
+
+        connection = db._connect()
+        try:
+            attempts, error, delivered_at = connection.execute(
+                "SELECT attempts, last_error, delivered_at FROM notification_outbox "
+                "WHERE company = ? AND job_id = ?",
+                ("Example", "new"),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(attempts, 1)
+        self.assertEqual(error, "SMTP temporarily unavailable")
+        self.assertIsNone(delivered_at)
+
+    def test_health_alert_threshold_recovery_and_weekly_schedule(self) -> None:
+        self.assertEqual(db.record_poll_failure("Example", "one"), (1, False))
+        self.assertEqual(db.record_poll_failure("Example", "two"), (2, False))
+        self.assertEqual(db.record_poll_failure("Example", "three"), (3, True))
+        self.assertEqual(db.record_poll_failure("Example", "four"), (4, False))
+        self.assertEqual(db.record_poll_success("Example", 0), (True, 1))
+        self.assertEqual(db.record_poll_success("Example", 0), (False, 2))
+        self.assertEqual(db.record_poll_success("Example", 5), (False, 0))
+
+        started = datetime(2026, 8, 24, tzinfo=timezone.utc)
+        self.assertFalse(db.weekly_summary_due(now=started))
+        self.assertFalse(db.weekly_summary_due(now=started + timedelta(days=6)))
+        self.assertTrue(db.weekly_summary_due(now=started + timedelta(days=7)))
+        db.mark_weekly_summary_sent(now=started + timedelta(days=7))
+        self.assertFalse(db.weekly_summary_due(now=started + timedelta(days=8)))
 
 class PollerTests(unittest.TestCase):
     def test_fetch_applies_company_filter(self) -> None:
@@ -645,8 +828,12 @@ class PollerTests(unittest.TestCase):
         bad = Company(COMPANY_NAME="Bad", fetch_jobs=Mock(side_effect=RuntimeError("board down")))
         with (
             patch.object(watch, "COMPANIES", [good, bad]),
+            patch.object(watch.notify, "validate_configuration"),
             patch.object(watch.notify, "ensure_opted_in"),
             patch.object(watch.notify, "notify_new_job"),
+            patch.object(watch.db, "record_poll_failure", return_value=(1, False)),
+            patch.object(watch.db, "record_poll_success", return_value=(False, 0)),
+            patch.object(watch.db, "weekly_summary_due", return_value=False),
             patch.object(watch.db, "sync_and_get_new", return_value=[] ) as sync,
         ):
             watch.run()
@@ -667,8 +854,10 @@ class PollerTests(unittest.TestCase):
             with (
                 patch.object(db, "DB_PATH", Path(temp_dir) / "jobs.db"),
                 patch.object(watch, "COMPANIES", [company]),
+                patch.object(watch.notify, "validate_configuration"),
                 patch.object(watch.notify, "ensure_opted_in"),
                 patch.object(watch.notify, "notify_new_job") as notify_new_job,
+                patch.object(watch.db, "mark_notification_delivered") as delivered,
                 patch.object(watch.observability, "log_event"),
             ):
                 watch.run()
@@ -676,9 +865,54 @@ class PollerTests(unittest.TestCase):
                 watch.run()
 
         notify_new_job.assert_called_once_with("Example", newly_posted)
+        delivered.assert_called_once_with("Example", "new")
 
 
 class EmailNotificationTests(unittest.TestCase):
+    def test_email_only_configuration_does_not_require_twilio(self) -> None:
+        with (
+            patch.object(notify, "EMAIL_ALERTS_ENABLED", True),
+            patch.object(notify, "SMS_ALERTS_ENABLED", False),
+            patch.object(notify, "SMTP_USER", "sender@example.test"),
+            patch.object(notify, "SMTP_PASSWORD", "app-password"),
+            patch.object(notify, "EMAIL_TO", "one@example.test, two@example.test"),
+        ):
+            self.assertEqual(notify.validate_configuration(), ("email",))
+
+    def test_configuration_requires_at_least_one_enabled_channel(self) -> None:
+        with (
+            patch.object(notify, "EMAIL_ALERTS_ENABLED", False),
+            patch.object(notify, "SMS_ALERTS_ENABLED", False),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No alert channel is enabled"):
+                notify.validate_configuration()
+
+    def test_email_only_notification_never_calls_twilio(self) -> None:
+        with (
+            patch.object(notify, "validate_configuration", return_value=("email",)),
+            patch.object(notify, "send_text") as send_text,
+            patch.object(notify, "send_email") as send_email,
+        ):
+            delivered = notify.notify_new_job("Example", job("1"))
+
+        self.assertEqual(delivered, ("email",))
+        send_text.assert_not_called()
+        send_email.assert_called_once()
+
+    def test_sms_failure_does_not_prevent_email_delivery(self) -> None:
+        with (
+            patch.object(
+                notify, "validate_configuration", return_value=("sms", "email")
+            ),
+            patch.object(notify, "send_text", side_effect=RuntimeError("Twilio down")),
+            patch.object(notify, "send_email") as send_email,
+            patch("builtins.print"),
+        ):
+            delivered = notify.notify_new_job("Example", job("1"))
+
+        self.assertEqual(delivered, ("email",))
+        send_email.assert_called_once()
+
     def test_send_email_authenticates_and_sends_expected_message(self) -> None:
         with (
             patch.object(notify, "SMTP_HOST", "smtp.example.test"),

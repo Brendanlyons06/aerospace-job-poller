@@ -36,6 +36,47 @@ SWE_ML_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Engineering roles that are useful for the aerospace, space, defense,
+# robotics, and advanced-manufacturing search.  Keep this title-based rather
+# than matching descriptions: the supported job-board feeds do not all
+# expose descriptions, and a stable title is much less likely to alert on a
+# software role that merely mentions a spacecraft in its copy.
+AEROSPACE_MECHANICAL_RE = re.compile(
+    r"(?:"
+    r"\baerospace\b|\baeronautical\b|"
+    r"\bmechanical(?:\s+design)?\b|"
+    r"\bflight\s+(?:sciences?|controls?|test|dynamics?)\b|"
+    r"\bgnc\b|\bguidance[\s,/-]+navigation(?:[\s,/-]+control)?\b|"
+    r"\baerodynamics?\b|\baircraft\s+performance\b|"
+    r"\bvehicle\s+engineering\b|\bstructures?\s+engineering\b|"
+    r"\bpropulsion\b|\bthermal\b|"
+    r"\bsystems?\s+(?:engineering|integration(?:\s*&?\s*test)?|test)\b|"
+    r"\bproject\s+engineering\b|\bmanufacturing\s+engineering\b|"
+    r"\bquality\s+engineering\b|\bindustrial\s+engineering\b|"
+    r"\breliability\s+engineering\b|\btest\s+engineering\b|"
+    r"\bcontrols?\s+engineering\b|\brobotics?\s+engineering\b|"
+    r"\bautonomy\s+engineering\b"
+    r")",
+    re.IGNORECASE,
+)
+
+AEROSPACE_SOFTWARE_RE = re.compile(
+    r"\b(?:software|web|frontend|backend|full[\s-]?stack|"
+    r"machine[\s-]?learning|data\s+science|computer\s+science|IT)\b",
+    re.IGNORECASE,
+)
+
+# Some aerospace employers post one intentionally broad internship for every
+# engineering discipline. Keep this separate from the main predicate so only
+# known aerospace boards opt into it; applying it to all 300+ companies would
+# make generic civil/electrical postings noisy.
+GENERIC_ENGINEERING_INTERNSHIP_RE = re.compile(
+    r"^(?:(?:spring|summer|fall|winter)\s+\d{4}\s+)?"
+    r"(?:graduate\s+engineer|engineering)\s+intern(?:ship)?"
+    r"(?:/co[\s-]?op)?(?:\s+-\s+undergraduate)?$",
+    re.IGNORECASE,
+)
+
 US_STATE_CODES = {
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
     "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
@@ -86,6 +127,22 @@ def is_swe_ml_title(title: str) -> bool:
     return isinstance(title, str) and bool(SWE_ML_RE.search(title))
 
 
+def is_aerospace_mechanical_title(title: str) -> bool:
+    """Return whether a title names an aerospace/mechanical-style role."""
+    return (
+        isinstance(title, str)
+        and bool(AEROSPACE_MECHANICAL_RE.search(title))
+        and not bool(AEROSPACE_SOFTWARE_RE.search(title))
+    )
+
+
+def is_generic_engineering_internship_title(title: str) -> bool:
+    """Recognize deliberately cross-discipline engineering internships."""
+    return isinstance(title, str) and bool(
+        GENERIC_ENGINEERING_INTERNSHIP_RE.fullmatch(title.strip())
+    )
+
+
 def is_us_location(location: str) -> bool:
     """Recognize the country and region labels used by supported job boards."""
     if not isinstance(location, str) or not location.strip():
@@ -115,6 +172,36 @@ def internships_in_us(jobs: list[dict]) -> list[dict]:
 def swe_ml_jobs(jobs: list[dict]) -> list[dict]:
     """Keep target-role jobs when type and country were proven structurally."""
     return [job for job in jobs if is_swe_ml_title(job.get("title", ""))]
+
+
+def aerospace_mechanical_jobs(
+    jobs: list[dict],
+    *,
+    require_internship: bool = True,
+    require_us: bool = True,
+) -> list[dict]:
+    """Keep aerospace/mechanical engineering postings for the target profile.
+
+    ``require_us=False`` is useful for boards such as SpaceX whose postings
+    use a company-wide location label (for example, ``Any SpaceX Site``)
+    instead of a country or city that :func:`is_us_location` can recognize.
+    """
+    result = []
+    for job in jobs:
+        title = job.get("title", "")
+        if require_internship and not is_internship_title(title):
+            continue
+        if not is_aerospace_mechanical_title(title):
+            continue
+        if require_us and not is_us_job(job):
+            continue
+        result.append(job)
+    return result
+
+
+def aerospace_mechanical_internships_us(jobs: list[dict]) -> list[dict]:
+    """Strict U.S. aerospace/mechanical internship fallback filter."""
+    return aerospace_mechanical_jobs(jobs)
 
 
 def us_only_no_phd(jobs: list[dict]) -> list[dict]:

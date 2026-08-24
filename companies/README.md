@@ -30,6 +30,12 @@ def fetch_jobs() -> list[dict]:
 the company runs its own bespoke job board — see AGENTS.md for how to
 reverse-engineer one from a HAR capture.
 
+The repository also includes an aerospace/mechanical profile. Set
+`JOB_POLLER_PROFILE=aerospace` to use the target manifest in `profiles.py` and
+the engineering-title predicate in `filters.py`. Hosted-board helpers accept
+`title_filter=role_title_filter()` so one adapter can preserve the original
+SWE/ML behavior when the profile is switched back.
+
 ## 1. Scaffold the folder
 
 ```
