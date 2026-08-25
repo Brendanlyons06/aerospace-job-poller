@@ -192,12 +192,15 @@ tracked in [`ROADMAP.md`](ROADMAP.md).
 
 ## Private AeroScout dashboard
 
-Phase 4 now includes the first dashboard slice in `dashboard/`: a responsive
-current-opportunity table with keyword search, discipline shortcuts, and
-direct application links. The Engineering & STEM Internship Finder reads
-active postings through restricted Supabase views. Migration
-`004_dashboard_locations_and_status.sql` adds structured location data and the
-last completed poll time; internal poller and delivery data remain inaccessible.
+Phase 4 includes a responsive current-opportunity table with keyword search,
+discipline, sector, company, work-mode, state, and discovery-date filters;
+sorting, pagination, closing-date labels, source-health status, and direct
+application links. The Engineering & STEM Internship Finder reads active
+postings through restricted Supabase views. Migrations
+`004_dashboard_locations_and_status.sql` and
+`005_dashboard_health_and_metrics.sql` add structured locations, poll
+freshness, aggregate metrics, and safe source statuses. Raw errors,
+notification history, and poller-control data remain inaccessible.
 
 Copy `dashboard/.env.example` to `dashboard/.env.local` and fill in:
 

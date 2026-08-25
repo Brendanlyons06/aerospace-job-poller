@@ -81,11 +81,17 @@ export function summarizeLocations(items: LocationItem[] | null | undefined, fal
     unique.push(normalized);
   }
 
-  if (!unique.length) return { display: 'Location not listed', full: 'Location not listed' };
+  if (!unique.length) return { display: 'Location not listed', full: 'Location not listed', values: [], states: [] };
   const shown = unique.slice(0, 3);
   const remaining = unique.length - shown.length;
+  const states = [...new Set(unique.flatMap((location) => {
+    const match = location.match(/,\s*([A-Z]{2})$/);
+    return match ? [match[1]] : [];
+  }))];
   return {
     display: `${shown.join(' · ')}${remaining ? ` · +${remaining} more` : ''}`,
     full: unique.join(' · '),
+    values: unique,
+    states,
   };
 }

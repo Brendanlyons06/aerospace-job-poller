@@ -55,15 +55,17 @@ of already-open internships from being emailed during the expansion.
 - [x] Keyword search, discipline shortcuts, and direct application links
 - [x] Last-completed-poll freshness indicator
 - [x] Normalized, deduplicated, compact multi-location display
-- [ ] Sector, company, date, work-mode, and location filters
+- [x] Safe per-source health status and aggregate active-role metrics
+- [x] Sector, company, date, work-mode, and state filters
 - [ ] Radius-based geographic search
-- [ ] Pagination and sorting
+- [x] Pagination and sorting
 
 The first dashboard slice is implemented in `dashboard/`. It displays a safe
 preview when its two Supabase settings are absent and automatically switches
 to the live active-job feed when they are present. The database exposes only
-the job-listing fields needed by the dashboard; notification, health, and
-poller-control tables remain inaccessible.
+job-listing fields, aggregate metrics, and non-sensitive source status;
+notification records, raw source errors, and poller-control tables remain
+inaccessible.
 
 ## Phase 5 — accounts and email subscriptions
 

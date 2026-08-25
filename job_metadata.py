@@ -90,6 +90,16 @@ _DISCIPLINE_PATTERNS = (
     ("robotics", r"\brobotics?\s+engineering\b"),
     ("autonomy", r"\bautonomy\s+engineering\b"),
     ("controls", r"\bcontrols?\s+engineering\b"),
+    ("electrical", r"\b(?:electrical|electronics?|power systems?|radio frequency|rf)\b"),
+    ("civil", r"\b(?:civil|geotechnical|transportation|water resources?)\b"),
+    ("materials", r"\b(?:materials?|metallurgy|composites?)\s+(?:science|engineering)\b"),
+    ("chemical", r"\b(?:chemical|process)\s+engineering\b"),
+    ("biomedical", r"\b(?:biomedical|bioengineering)\b"),
+    ("data-science", r"\b(?:data science|data scientist|analytics?|machine learning|artificial intelligence|ai/ml)\b"),
+    ("software", r"\b(?:software|firmware|embedded systems?|developer|computer science|cybersecurity)\b"),
+    ("physics-research", r"\b(?:physics|scientific research|research scientist)\b"),
+    ("supply-chain", r"\b(?:supply chain|logistics|procurement)\b"),
+    ("business", r"\b(?:business|finance|accounting|marketing|human resources?|operations)\b"),
     ("project", r"\bproject\s+engineering\b"),
     ("test", r"\btest\s+engineering\b"),
 )
@@ -212,10 +222,11 @@ def normalize_work_mode(value: str | None, title: str, locations: list[str]) -> 
 
 def normalize_employment_type(value: str | None, title: str) -> str | None:
     text = (value or "").strip().lower()
+    combined = f"{text} {title or ''}".lower()
+    if re.search(r"\bco[ -]?op\b", combined):
+        return "co-op"
     if "intern" in text or (not text and is_internship_title(title)):
         return "internship"
-    if "co-op" in text or "coop" in text:
-        return "co-op"
     if "full" in text:
         return "full-time"
     if "part" in text:

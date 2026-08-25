@@ -33,11 +33,11 @@ export default async function Home() {
           <dl className="hero-stats">
             <div><dt>{result.sourceCount}</dt><dd>career sources</dd></div>
             <div><dt>1 hr</dt><dd>refresh cycle</dd></div>
-            <div><dt>U.S.</dt><dd>engineering internships</dd></div>
+            <div><dt>{result.activeJobCount}</dt><dd>active U.S. internships</dd></div>
           </dl>
         </div>
       </section>
-      <section className="shell finder"><JobsTable jobs={result.jobs} notice={result.notice} isLive={result.source === 'live'} /></section>
+      <section className="shell finder"><JobsTable jobs={result.jobs} sources={result.sources} notice={result.notice} isLive={result.source === 'live'} sourceCount={result.sourceCount} healthySourceCount={result.healthySourceCount} warningSourceCount={result.warningSourceCount} lastRefreshedAt={result.lastRefreshedAt} /></section>
       <footer className="shell"><span>AeroScout</span><span>Engineering &amp; STEM internship search.</span></footer>
     </main>
   );

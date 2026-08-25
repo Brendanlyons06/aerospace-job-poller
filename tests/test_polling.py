@@ -831,6 +831,23 @@ class DashboardMetadataTests(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertEqual(job_metadata.classify_discipline(title), expected)
 
+    def test_broader_stem_disciplines_and_coops_are_classified(self) -> None:
+        cases = {
+            "Electrical Engineering Intern": "electrical",
+            "Civil Engineering Co-op": "civil",
+            "Machine Learning Internship": "data-science",
+            "Embedded Software Engineering Intern": "software",
+            "Materials Science Intern": "materials",
+            "Supply Chain Operations Intern": "supply-chain",
+        }
+        for title, expected in cases.items():
+            with self.subTest(title=title):
+                self.assertEqual(job_metadata.classify_discipline(title), expected)
+        self.assertEqual(
+            job_metadata.normalize_employment_type(None, "Civil Engineering Co-op"),
+            "co-op",
+        )
+
     def test_locations_are_structured_without_discarding_source_label(self) -> None:
         standard = job_metadata.structured_location("Long Beach, California, United States")
         reverse = job_metadata.structured_location("US, NY, New York")
@@ -1143,6 +1160,15 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("last_poll_completed_at", status_migration)
         self.assertIn("GRANT SELECT ON public.dashboard_status TO anon", status_migration)
         self.assertNotIn("notification_outbox", status_migration)
+        health_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "005_dashboard_health_and_metrics.sql"
+        ).read_text()
+        self.assertIn("CREATE VIEW public.dashboard_sources", health_migration)
+        self.assertIn("active_job_count", health_migration)
+        self.assertIn("healthy_source_count", health_migration)
+        self.assertIn("GRANT SELECT ON public.dashboard_sources TO anon", health_migration)
+        self.assertNotIn("last_error", health_migration)
+        self.assertNotIn("notification_outbox", health_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
