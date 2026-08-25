@@ -6,12 +6,18 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'AeroScout — Aerospace Internship Finder',
-  description: 'A focused dashboard for aerospace and mechanical engineering internships.',
+  title: 'AeroScout — Engineering & STEM Internship Finder',
+  description: 'A focused dashboard for engineering and STEM internships across leading employers.',
   openGraph: {
-    title: 'AeroScout',
-    description: 'Aerospace Internship Finder',
-    images: ['/aeroscout-social-preview.png'],
+    title: 'AeroScout — Engineering & STEM Internship Finder',
+    description: 'Search current engineering and STEM internship opportunities.',
+    images: ['https://aeroscout-internships.brendanlyons07.chatgpt.site/og.png'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'AeroScout — Engineering & STEM Internship Finder',
+    description: 'Search current engineering and STEM internship opportunities.',
+    images: ['https://aeroscout-internships.brendanlyons07.chatgpt.site/og.png'],
   },
 };
 

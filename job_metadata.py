@@ -120,6 +120,59 @@ _COUNTRY_LABELS = {
 }
 
 
+def _clean_city_name(value: str) -> str | None:
+    """Drop ATS site codes and facility details from a city-like value."""
+    text = re.sub(r"\s*~.*$", "", value or "").strip()
+    text = re.sub(r"\s*\([A-Z0-9 -]{1,8}\)\s*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"-(?:[A-Z]\d{1,4}|\d{1,4})$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" ,-~")
+    if not text:
+        return None
+    return text.title() if text.isupper() else text
+
+
+def normalize_location_parts(label: str, details: dict | None = None) -> tuple[str | None, str | None]:
+    """Extract a reusable city/state pair from human or ATS location labels."""
+    details = details or {}
+    supplied_city = details.get("city")
+    supplied_state = details.get("state")
+    if isinstance(supplied_state, str):
+        supplied_state = US_STATE_NAME_TO_CODE.get(
+            supplied_state.strip().lower(), supplied_state.strip().upper()
+        )
+    if isinstance(supplied_city, str) and supplied_city.strip():
+        return _clean_city_name(supplied_city), supplied_state
+
+    text = (label or "").strip()
+    ats_match = re.match(r"^US-([A-Z]{2})-(.+)$", text, re.IGNORECASE)
+    if ats_match:
+        return _clean_city_name(ats_match.group(2)), supplied_state or ats_match.group(1).upper()
+
+    workday_match = re.fullmatch(
+        r"United States(?: of America)?-([^-]+)-(.+)", text, re.IGNORECASE
+    )
+    if workday_match:
+        state_name = workday_match.group(1).strip()
+        state = US_STATE_NAME_TO_CODE.get(state_name.lower(), state_name.upper())
+        return _clean_city_name(workday_match.group(2)), supplied_state or state
+
+    tokens = [
+        part.strip()
+        for part in re.split(r"\s*[,|;]\s*", re.sub(r"\s*~.*$", "", text))
+        if part.strip()
+    ]
+    useful = [part for part in tokens if part.lower().strip(". ") not in _COUNTRY_LABELS]
+    for index, token in enumerate(useful):
+        lowered = token.lower().strip(". ")
+        state = token.upper() if token.upper() in US_STATE_CODES else US_STATE_NAME_TO_CODE.get(lowered)
+        if not state:
+            continue
+        city = useful[index - 1] if index > 0 else (useful[index + 1] if index + 1 < len(useful) else "")
+        return _clean_city_name(city), supplied_state or state
+
+    return None, supplied_state
+
+
 def company_sector(company: str) -> str:
     """Return the stable dashboard sector for a company."""
     return COMPANY_SECTORS.get(company, "other-engineering")
@@ -203,35 +256,7 @@ def _number(value) -> float | None:
 def structured_location(label: str, details: dict | None = None) -> dict:
     """Parse a display label while preserving optional source coordinates."""
     details = details or {}
-    workday_match = re.fullmatch(
-        r"United States(?: of America)?-([^-]+)-(.+)", label, re.IGNORECASE
-    )
-    if workday_match:
-        tokens = [workday_match.group(2), workday_match.group(1)]
-    else:
-        tokens = [
-            part.strip()
-            for part in re.split(r"\s*[,|;]\s*", label)
-            if part.strip()
-        ]
-    useful = [part for part in tokens if part.lower() not in _COUNTRY_LABELS]
-    state = None
-    state_index = None
-    for index, token in enumerate(useful):
-        lowered = token.lower().strip(". ")
-        if token.upper() in US_STATE_CODES:
-            state, state_index = token.upper(), index
-            break
-        if lowered in US_STATE_NAME_TO_CODE:
-            state, state_index = US_STATE_NAME_TO_CODE[lowered], index
-            break
-
-    city = details.get("city")
-    if not city and state_index is not None and "remote" not in label.lower():
-        if state_index > 0:
-            city = useful[state_index - 1]
-        elif state_index + 1 < len(useful):
-            city = useful[state_index + 1]
+    city, state = normalize_location_parts(label, details)
 
     latitude = details.get("latitude")
     longitude = details.get("longitude")
@@ -241,16 +266,11 @@ def structured_location(label: str, details: dict | None = None) -> dict:
     except (TypeError, ValueError):
         latitude = longitude = None
 
-    supplied_state = details.get("state")
-    if isinstance(supplied_state, str):
-        supplied_state = US_STATE_NAME_TO_CODE.get(
-            supplied_state.strip().lower(), supplied_state.strip().upper()
-        )
     return {
         "label": label,
         "city": city,
-        "state": supplied_state or state,
-        "country": details.get("country") or ("US" if is_us_location(label) else None),
+        "state": state,
+        "country": details.get("country") or ("US" if state or is_us_location(label) else None),
         "latitude": latitude,
         "longitude": longitude,
     }

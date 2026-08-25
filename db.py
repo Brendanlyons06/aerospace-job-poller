@@ -635,3 +635,16 @@ def mark_weekly_summary_sent(*, now: datetime | None = None) -> None:
             ("weekly_health_summary", now.isoformat()),
         )
         conn.commit()
+
+
+def mark_poll_completed(*, now: datetime | None = None) -> None:
+    """Record when a full poll completed for dashboard freshness display."""
+    now = now or datetime.now(timezone.utc)
+    with _connection() as conn:
+        _execute(
+            conn,
+            "INSERT INTO system_meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("last_poll_completed_at", now.isoformat()),
+        )
+        conn.commit()

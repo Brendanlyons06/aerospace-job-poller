@@ -845,6 +845,18 @@ class DashboardMetadataTests(unittest.TestCase):
         self.assertIsNone(remote["city"])
         self.assertEqual(remote["label"], "Remote, United States")
 
+    def test_ats_site_locations_are_normalized_to_city_and_state(self) -> None:
+        cases = {
+            "US-CA-EL SEGUNDO-R01 ~ 2000 E Imperial Hwy ~ BLDG R01": ("El Segundo", "CA"),
+            "US-CO-AURORA-S75 ~ 16800 E Centretech Pkwy ~ BLDG S75": ("Aurora", "CO"),
+            "US-NY-East Farmingdale (TR)": ("East Farmingdale", "NY"),
+        }
+        for label, expected in cases.items():
+            with self.subTest(label=label):
+                location = job_metadata.structured_location(label)
+                self.assertEqual((location["city"], location["state"]), expected)
+                self.assertEqual(location["label"], label)
+
     def test_optional_dashboard_fields_are_normalized(self) -> None:
         enriched = job_metadata.enrich_job(
             "Joby Aviation",
@@ -941,6 +953,17 @@ class DatabaseDiffTests(unittest.TestCase):
         self.assertTrue(db.weekly_summary_due(now=started + timedelta(days=7)))
         db.mark_weekly_summary_sent(now=started + timedelta(days=7))
         self.assertFalse(db.weekly_summary_due(now=started + timedelta(days=8)))
+
+        completed = started + timedelta(hours=2)
+        db.mark_poll_completed(now=completed)
+        connection = db._connect()
+        try:
+            stored = connection.execute(
+                "SELECT value FROM system_meta WHERE key = 'last_poll_completed_at'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(stored, completed.isoformat())
 
     def test_dashboard_rows_and_two_poll_closure_lifecycle(self) -> None:
         posting = job("phase-2", "Mechanical Design Engineering Intern") | {
@@ -1112,6 +1135,14 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("REVOKE ALL ON public.dashboard_active_jobs FROM PUBLIC", read_api_migration)
         self.assertIn("GRANT SELECT ON public.dashboard_active_jobs TO anon", read_api_migration)
         self.assertNotIn("notification_outbox", read_api_migration)
+        status_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "004_dashboard_locations_and_status.sql"
+        ).read_text()
+        self.assertIn("AS location_items", status_migration)
+        self.assertIn("CREATE VIEW public.dashboard_status", status_migration)
+        self.assertIn("last_poll_completed_at", status_migration)
+        self.assertIn("GRANT SELECT ON public.dashboard_status TO anon", status_migration)
+        self.assertNotIn("notification_outbox", status_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
@@ -1180,6 +1211,7 @@ class PollerTests(unittest.TestCase):
             patch.object(watch.db, "record_poll_failure", return_value=(1, False)),
             patch.object(watch.db, "record_poll_success", return_value=(False, 0)),
             patch.object(watch.db, "weekly_summary_due", return_value=False),
+            patch.object(watch.db, "mark_poll_completed"),
             patch.object(watch.db, "sync_and_get_new", return_value=[] ) as sync,
         ):
             watch.run()

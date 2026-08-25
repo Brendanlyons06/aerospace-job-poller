@@ -53,6 +53,8 @@ of already-open internships from being emailed during the expansion.
 - [x] Private AeroScout dashboard foundation
 - [x] Current-job table backed by a restricted Supabase read view
 - [x] Keyword search, discipline shortcuts, and direct application links
+- [x] Last-completed-poll freshness indicator
+- [x] Normalized, deduplicated, compact multi-location display
 - [ ] Sector, company, date, work-mode, and location filters
 - [ ] Radius-based geographic search
 - [ ] Pagination and sorting

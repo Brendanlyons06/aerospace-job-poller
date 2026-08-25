@@ -194,10 +194,10 @@ tracked in [`ROADMAP.md`](ROADMAP.md).
 
 Phase 4 now includes the first dashboard slice in `dashboard/`: a responsive
 current-opportunity table with keyword search, discipline shortcuts, and
-direct application links. It reads active postings through the restricted
-`dashboard_active_jobs` Supabase view created by migration
-`003_dashboard_read_api.sql`; internal poller and delivery data are not
-exposed.
+direct application links. The Engineering & STEM Internship Finder reads
+active postings through restricted Supabase views. Migration
+`004_dashboard_locations_and_status.sql` adds structured location data and the
+last completed poll time; internal poller and delivery data remain inaccessible.
 
 Copy `dashboard/.env.example` to `dashboard/.env.local` and fill in:
 

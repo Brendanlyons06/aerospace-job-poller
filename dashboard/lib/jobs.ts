@@ -1,3 +1,5 @@
+import { summarizeLocations, type LocationItem } from './locations';
+
 export type DashboardJob = {
   company: string;
   jobId: string;
@@ -9,6 +11,7 @@ export type DashboardJob = {
   postedAt: string | null;
   firstSeen: string;
   location: string;
+  fullLocation: string;
 };
 
 type SupabaseJob = {
@@ -21,49 +24,64 @@ type SupabaseJob = {
   work_mode: string | null;
   posted_at: string | null;
   first_seen: string;
+  location_items: LocationItem[] | null;
   location_display: string | null;
 };
 
+type SupabaseStatus = {
+  refreshed_at: string | null;
+  career_source_count: number | string;
+};
+
 const demoJobs: DashboardJob[] = [
-  { company: 'Anduril', jobId: 'demo-1', title: '2027 Mechanical Engineer Intern', url: null, sector: 'Defense', discipline: 'Mechanical', workMode: 'On-site', postedAt: null, firstSeen: new Date().toISOString(), location: 'Costa Mesa, CA' },
-  { company: 'Apple', jobId: 'demo-2', title: 'Hardware Engineering Internships', url: null, sector: 'Advanced Manufacturing', discipline: 'Mechanical', workMode: 'On-site', postedAt: null, firstSeen: new Date().toISOString(), location: 'Cupertino, CA' },
-  { company: 'GE Aerospace', jobId: 'demo-3', title: 'Systems Engineering Intern — Summer 2027', url: null, sector: 'Aerospace', discipline: 'Systems', workMode: 'On-site', postedAt: null, firstSeen: new Date(Date.now() - 86_400_000).toISOString(), location: 'Evendale, OH' },
-  { company: 'Zipline', jobId: 'demo-4', title: 'Aerodynamics Intern — Summer 2027', url: null, sector: 'Aircraft & eVTOL', discipline: 'Aerospace', workMode: 'On-site', postedAt: null, firstSeen: new Date(Date.now() - 86_400_000).toISOString(), location: 'South San Francisco, CA' },
+  { company: 'Anduril', jobId: 'demo-1', title: '2027 Mechanical Engineer Intern', url: null, sector: 'Defense', discipline: 'Mechanical', workMode: 'On-site', postedAt: null, firstSeen: new Date().toISOString(), location: 'Costa Mesa, CA', fullLocation: 'Costa Mesa, CA' },
+  { company: 'Apple', jobId: 'demo-2', title: 'Hardware Engineering Internships', url: null, sector: 'Advanced Manufacturing', discipline: 'Mechanical', workMode: 'On-site', postedAt: null, firstSeen: new Date().toISOString(), location: 'Cupertino, CA', fullLocation: 'Cupertino, CA' },
+  { company: 'GE Aerospace', jobId: 'demo-3', title: 'Systems Engineering Intern — Summer 2027', url: null, sector: 'Aerospace', discipline: 'Systems', workMode: 'On-site', postedAt: null, firstSeen: new Date(Date.now() - 86_400_000).toISOString(), location: 'Evendale, OH · Arkansas City, KS · Asheville, NC · +24 more', fullLocation: 'Evendale, OH · Arkansas City, KS · Asheville, NC · 24 additional locations' },
+  { company: 'Zipline', jobId: 'demo-4', title: 'Aerodynamics Intern — Summer 2027', url: null, sector: 'Aircraft & eVTOL', discipline: 'Aerospace', workMode: 'On-site', postedAt: null, firstSeen: new Date(Date.now() - 86_400_000).toISOString(), location: 'South San Francisco, CA', fullLocation: 'South San Francisco, CA' },
 ];
 
-export type JobsResult = { jobs: DashboardJob[]; source: 'live' | 'demo'; notice: string };
+export type JobsResult = { jobs: DashboardJob[]; source: 'live' | 'demo'; notice: string; lastRefreshedAt: string | null; sourceCount: number };
 
 export async function getDashboardJobs(): Promise<JobsResult> {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
   const key = process.env.SUPABASE_ANON_KEY;
   if (!url || !key) {
-    return { jobs: demoJobs, source: 'demo', notice: 'Preview data — add the two Supabase dashboard settings to display your live job feed.' };
+    return { jobs: demoJobs, source: 'demo', notice: 'Preview data — add the two Supabase dashboard settings to display your live job feed.', lastRefreshedAt: null, sourceCount: 50 };
   }
 
   try {
-    const response = await fetch(`${url}/rest/v1/dashboard_active_jobs?select=*&order=first_seen.desc`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
-      cache: 'no-store',
-    });
+    const headers = { apikey: key, Authorization: `Bearer ${key}` };
+    const [response, statusResponse] = await Promise.all([
+      fetch(`${url}/rest/v1/dashboard_active_jobs?select=*&order=first_seen.desc`, { headers, cache: 'no-store' }),
+      fetch(`${url}/rest/v1/dashboard_status?select=*&limit=1`, { headers, cache: 'no-store' }),
+    ]);
     if (!response.ok) throw new Error(`Supabase returned ${response.status}`);
     const rows = (await response.json()) as SupabaseJob[];
+    const statusRows = statusResponse.ok ? (await statusResponse.json()) as SupabaseStatus[] : [];
+    const status = statusRows[0];
     return {
       source: 'live',
       notice: 'Live data from the hourly job poller.',
-      jobs: rows.map((row) => ({
-        company: row.company,
-        jobId: row.job_id,
-        title: row.title,
-        url: row.url || null,
-        sector: row.sector,
-        discipline: row.discipline,
-        workMode: row.work_mode,
-        postedAt: row.posted_at,
-        firstSeen: row.first_seen,
-        location: row.location_display || 'Location not listed',
-      })),
+      lastRefreshedAt: status?.refreshed_at || null,
+      sourceCount: Number(status?.career_source_count) || 50,
+      jobs: rows.map((row) => {
+        const locations = summarizeLocations(row.location_items, row.location_display);
+        return {
+          company: row.company,
+          jobId: row.job_id,
+          title: row.title,
+          url: row.url || null,
+          sector: row.sector,
+          discipline: row.discipline,
+          workMode: row.work_mode,
+          postedAt: row.posted_at,
+          firstSeen: row.first_seen,
+          location: locations.display,
+          fullLocation: locations.full,
+        };
+      }),
     };
   } catch {
-    return { jobs: demoJobs, source: 'demo', notice: 'The live feed could not be reached, so preview data is shown.' };
+    return { jobs: demoJobs, source: 'demo', notice: 'The live feed could not be reached, so preview data is shown.', lastRefreshedAt: null, sourceCount: 50 };
   }
 }

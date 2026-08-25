@@ -42,7 +42,7 @@ export default function JobsTable({ jobs, notice, isLive }: { jobs: DashboardJob
     const needle = query.trim().toLowerCase();
     return jobs.filter((job) => {
       const matchesDiscipline = discipline === 'All disciplines' || job.discipline === discipline;
-      const searchable = [job.title, job.company, job.location, job.discipline, job.sector, job.workMode].filter(Boolean).join(' ').toLowerCase();
+      const searchable = [job.title, job.company, job.fullLocation, job.discipline, job.sector, job.workMode].filter(Boolean).join(' ').toLowerCase();
       return matchesDiscipline && (!needle || searchable.includes(needle));
     });
   }, [discipline, jobs, query]);
@@ -69,7 +69,7 @@ export default function JobsTable({ jobs, notice, isLive }: { jobs: DashboardJob
               <tr key={`${job.company}-${job.jobId}`}>
                 <td><span className="company-mark">{job.company.slice(0, 2).toUpperCase()}</span><span><strong>{job.title}</strong><small>{job.company}</small></span></td>
                 <td><span className="tag">{job.discipline || 'Engineering'}</span></td>
-                <td>{job.location}</td><td>{ageLabel(job.postedAt || job.firstSeen)}</td>
+                <td className="location-cell"><span title={job.fullLocation}>{job.location}</span></td><td>{ageLabel(job.postedAt || job.firstSeen)}</td>
                 <td>{job.url ? <a className="arrow" href={job.url} target="_blank" rel="noreferrer" aria-label={`Apply for ${job.title} at ${job.company}`}>↗</a> : <span className="arrow disabled" aria-hidden="true">↗</span>}</td>
               </tr>
             ))}

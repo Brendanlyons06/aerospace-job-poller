@@ -170,6 +170,8 @@ def _run_once() -> None:
         ):
             db.mark_weekly_summary_sent()
 
+    db.mark_poll_completed()
+
     elapsed = time.monotonic() - started
     summary = f"polled {len(results)}/{len(COMPANIES)} companies in {elapsed:.1f}s"
     if failures:
