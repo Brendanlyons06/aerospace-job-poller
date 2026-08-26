@@ -3,6 +3,8 @@ export type LocationItem = {
   city: string | null;
   state: string | null;
   country: string | null;
+  latitude: number | string | null;
+  longitude: number | string | null;
 };
 
 const stateCodes: Record<string, string> = {
@@ -69,8 +71,9 @@ export function normalizeLocation(item: LocationItem): string | null {
 }
 
 export function summarizeLocations(items: LocationItem[] | null | undefined, fallback: string | null) {
-  const candidates = items?.length ? items : [{ label: fallback, city: null, state: null, country: null }];
+  const candidates = items?.length ? items : [{ label: fallback, city: null, state: null, country: null, latitude: null, longitude: null }];
   const unique: string[] = [];
+  const coordinates: { latitude: number; longitude: number }[] = [];
   const seen = new Set<string>();
   for (const item of candidates) {
     const normalized = normalizeLocation(item);
@@ -79,9 +82,12 @@ export function summarizeLocations(items: LocationItem[] | null | undefined, fal
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(normalized);
+    const latitude = Number(item.latitude);
+    const longitude = Number(item.longitude);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) coordinates.push({ latitude, longitude });
   }
 
-  if (!unique.length) return { display: 'Location not listed', full: 'Location not listed', values: [], states: [] };
+  if (!unique.length) return { display: 'Location not listed', full: 'Location not listed', values: [], states: [], coordinates };
   const shown = unique.slice(0, 3);
   const remaining = unique.length - shown.length;
   const states = [...new Set(unique.flatMap((location) => {
@@ -93,5 +99,6 @@ export function summarizeLocations(items: LocationItem[] | null | undefined, fal
     full: unique.join(' · '),
     values: unique,
     states,
+    coordinates,
   };
 }

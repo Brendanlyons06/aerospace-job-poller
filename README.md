@@ -17,6 +17,8 @@ this version.
 - The previous macOS `launchd` scheduler is disabled but preserved as a
   rollback option.
 - Sends Gmail alerts for newly discovered matching postings.
+- Supports self-service, verified daily or weekly email digests for a free
+  beta capped at 100 active subscribers.
 - Supports optional Twilio SMS alerts, disabled by default.
 - Has 50 enabled aerospace-profile adapters using official career sources.
 - Stores dashboard-ready sectors, disciplines, lifecycle dates, structured
@@ -190,7 +192,7 @@ local service files remain available for rollback.
 The planned company expansion, dashboard, subscription, and SMS phases are
 tracked in [`ROADMAP.md`](ROADMAP.md).
 
-## Private AeroScout dashboard
+## AeroScout dashboard
 
 Phase 4 includes a responsive current-opportunity table with keyword search,
 discipline, sector, company, work-mode, state, and discovery-date filters;
@@ -201,6 +203,22 @@ postings through restricted Supabase views. Migrations
 `005_dashboard_health_and_metrics.sql` add structured locations, poll
 freshness, aggregate metrics, and safe source statuses. Raw errors,
 notification history, and poller-control data remain inaccessible.
+
+The dashboard also includes device-local saved jobs, browser-location radius
+filtering for postings whose source supplies coordinates, and a public email
+subscription form. Subscribers select optional discipline, sector, company,
+and state filters, confirm their email through a seven-day link, and can
+unsubscribe from every digest. Subscriber addresses, delivery errors, and
+tokens are protected by row-level security and are never exposed through the
+dashboard API.
+
+The initial public beta has a hard database cap of 100 confirmed subscribers.
+Confirmation requests are limited to 20 per hour, verification emails to 10
+per poll, and digests to 20 per poll. These guardrails keep the existing Gmail
+sender well below its consumer-account ceiling and prevent one burst of
+signups from consuming the free allowance. Gmail is appropriate for this
+small private beta, but a transactional sender should replace it before the
+service is marketed broadly.
 
 Copy `dashboard/.env.example` to `dashboard/.env.local` and fill in:
 
@@ -224,7 +242,7 @@ clearly labeled preview data.
 | `watch.py` | Concurrent polling, diffing, alerts, and health handling |
 | `db.py` | SQLite/PostgreSQL job history, outbox, and source-health state |
 | `supabase/migrations/` | Versioned cloud database schema |
-| `dashboard/` | Private AeroScout searchable dashboard |
+| `dashboard/` | AeroScout searchable dashboard and self-service subscriptions |
 | `.github/workflows/hourly-poller.yml` | Free hourly cloud schedule |
 | `notify.py` | Gmail and optional Twilio delivery |
 | `check.py` | Read-only adapter and stable-ID validation |

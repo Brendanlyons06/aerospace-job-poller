@@ -55,6 +55,38 @@ def _weekly_health_body() -> str:
     return "\n".join(lines)
 
 
+def _process_public_subscriptions() -> None:
+    """Send bounded confirmation and digest batches using the existing SMTP account."""
+    if not notify.PUBLIC_SUBSCRIPTIONS_ENABLED:
+        return
+    for subscription in db.pending_subscription_verifications(limit=10):
+        try:
+            notify.send_subscription_verification(
+                subscription["email"], subscription["verification_token"]
+            )
+        except Exception as exc:
+            db.mark_subscription_delivery_failed(
+                subscription["email"], f"{type(exc).__name__}: {exc}"
+            )
+            print(f"SUBSCRIPTION VERIFICATION FAILED: {type(exc).__name__}: {exc}")
+        else:
+            db.mark_subscription_verification_sent(subscription["email"])
+
+    for digest in db.due_subscription_digests(limit=20):
+        try:
+            if digest["jobs"]:
+                notify.send_subscription_digest(
+                    digest["email"], digest["jobs"], digest["unsubscribe_token"]
+                )
+        except Exception as exc:
+            db.mark_subscription_delivery_failed(
+                digest["email"], f"{type(exc).__name__}: {exc}"
+            )
+            print(f"SUBSCRIPTION DIGEST FAILED: {type(exc).__name__}: {exc}")
+        else:
+            db.mark_subscription_digest_complete(digest["email"], digest["frequency"])
+
+
 def _fetch(company, run_id: str | None = None) -> list[dict]:
     """Fetch + filter one company. Runs on a pool thread; touches no shared state."""
     run_id = run_id or uuid.uuid4().hex
@@ -169,6 +201,8 @@ def _run_once() -> None:
             "Weekly aerospace job-poller status", _weekly_health_body()
         ):
             db.mark_weekly_summary_sent()
+
+    _process_public_subscriptions()
 
     db.mark_poll_completed()
 

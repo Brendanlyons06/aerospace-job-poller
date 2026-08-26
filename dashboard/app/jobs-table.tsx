@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DashboardJob, DashboardSource } from '../lib/jobs';
+import SubscriptionForm from './subscription-form';
 
 const PAGE_SIZE = 25;
 
@@ -64,6 +65,19 @@ function checkedLabel(value: string | null, referenceTime: number) {
   return `Checked ${ageLabel(value, referenceTime).toLowerCase()}`;
 }
 
+function jobKey(job: DashboardJob) {
+  return `${job.company}::${job.jobId}`;
+}
+
+function distanceMiles(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDelta = radians(b.latitude - a.latitude);
+  const longitudeDelta = radians(b.longitude - a.longitude);
+  const value = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(radians(a.latitude)) * Math.cos(radians(b.latitude)) * Math.sin(longitudeDelta / 2) ** 2;
+  return 3958.8 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
 type JobsTableProps = {
   jobs: DashboardJob[];
   sources: DashboardSource[];
@@ -73,9 +87,11 @@ type JobsTableProps = {
   healthySourceCount: number;
   warningSourceCount: number;
   lastRefreshedAt: string | null;
+  subscriberCount: number;
+  subscriberCap: number;
 };
 
-export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, healthySourceCount, warningSourceCount, lastRefreshedAt }: JobsTableProps) {
+export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, healthySourceCount, warningSourceCount, lastRefreshedAt, subscriberCount, subscriberCap }: JobsTableProps) {
   const [query, setQuery] = useState('');
   const [discipline, setDiscipline] = useState('all');
   const [sector, setSector] = useState('all');
@@ -85,6 +101,11 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
   const [freshness, setFreshness] = useState('all');
   const [sort, setSort] = useState('newest');
   const [page, setPage] = useState(1);
+  const [savedJobs, setSavedJobs] = useState<Set<string>>(new Set());
+  const [savedOnly, setSavedOnly] = useState(false);
+  const [position, setPosition] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [radius, setRadius] = useState(50);
+  const [geoMessage, setGeoMessage] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -96,6 +117,18 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
     };
     window.addEventListener('keydown', onShortcut);
     return () => window.removeEventListener('keydown', onShortcut);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem('aeroscout-saved-jobs') || '[]');
+        if (Array.isArray(saved)) setSavedJobs(new Set(saved.filter((item): item is string => typeof item === 'string')));
+      } catch {
+        setSavedJobs(new Set());
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const referenceTime = timestamp(lastRefreshedAt) || Math.max(0, ...jobs.map((job) => timestamp(job.firstSeen)));
@@ -114,12 +147,15 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
     const filtered = jobs.filter((job) => {
       const searchable = [job.title, job.company, job.fullLocation, label(job.discipline), label(job.sector), label(job.workMode)].filter(Boolean).join(' ').toLowerCase();
       const discoveredAge = referenceTime - timestamp(job.firstSeen);
+      const inRadius = !position || job.locationCoordinates.some((coordinates) => distanceMiles(position, coordinates) <= radius);
       return (discipline === 'all' || job.discipline === discipline)
         && (sector === 'all' || job.sector === sector)
         && (company === 'all' || job.company === company)
         && (workMode === 'all' || job.workMode === workMode)
         && (state === 'all' || job.locationStates.includes(state))
         && (maxAge === null || discoveredAge <= maxAge)
+        && (!savedOnly || savedJobs.has(jobKey(job)))
+        && inRadius
         && (!needle || searchable.includes(needle));
     });
 
@@ -133,11 +169,11 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
       }
       return timestamp(b.firstSeen) - timestamp(a.firstSeen);
     });
-  }, [company, discipline, freshness, jobs, query, referenceTime, sector, sort, state, workMode]);
+  }, [company, discipline, freshness, jobs, position, query, radius, referenceTime, savedJobs, savedOnly, sector, sort, state, workMode]);
 
   const pageCount = Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE));
   const visibleJobs = filteredJobs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const filtersActive = Boolean(query || discipline !== 'all' || sector !== 'all' || company !== 'all' || workMode !== 'all' || state !== 'all' || freshness !== 'all');
+  const filtersActive = Boolean(query || discipline !== 'all' || sector !== 'all' || company !== 'all' || workMode !== 'all' || state !== 'all' || freshness !== 'all' || savedOnly || position);
   const attentionSources = sources.filter((source) => source.status === 'degraded' || source.status === 'failing');
   const orderedSources = [...sources].sort((a, b) => {
     const priority = { failing: 0, degraded: 1, pending: 2, 'no-open-roles': 3, healthy: 4 };
@@ -146,7 +182,27 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
 
   const clearFilters = () => {
     setQuery(''); setDiscipline('all'); setSector('all'); setCompany('all');
-    setWorkMode('all'); setState('all'); setFreshness('all'); setSort('newest'); setPage(1);
+    setWorkMode('all'); setState('all'); setFreshness('all'); setSort('newest'); setSavedOnly(false); setPosition(null); setGeoMessage(''); setPage(1);
+  };
+
+  const toggleSaved = (job: DashboardJob) => {
+    const key = jobKey(job);
+    setSavedJobs((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      window.localStorage.setItem('aeroscout-saved-jobs', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const useLocation = () => {
+    if (!navigator.geolocation) { setGeoMessage('Location filtering is not supported by this browser.'); return; }
+    setGeoMessage('Requesting your location…');
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => { setPosition({ latitude: coords.latitude, longitude: coords.longitude }); setGeoMessage('Radius filter active for jobs with map coordinates.'); setPage(1); },
+      () => setGeoMessage('Location permission was not granted.'),
+      { enableHighAccuracy: false, timeout: 10_000 },
+    );
   };
 
   return (
@@ -155,6 +211,15 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
         <div><p className="eyebrow dark">Internship finder</p><h2>Current opportunities</h2></div>
         <span className="result-count">{filteredJobs.length} {filteredJobs.length === 1 ? 'role' : 'roles'} shown</span>
       </div>
+
+      <SubscriptionForm
+        disciplines={options.disciplines.map((value) => ({ value, label: label(value) }))}
+        sectors={options.sectors.map((value) => ({ value, label: label(value) }))}
+        companies={options.companies}
+        states={options.states}
+        subscriberCount={subscriberCount}
+        subscriberCap={subscriberCap}
+      />
 
       <details className={`source-health ${warningSourceCount ? 'attention' : ''}`}>
         <summary>
@@ -193,6 +258,13 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
         <button className="clear-filters" type="button" onClick={clearFilters} disabled={!filtersActive}>Reset filters</button>
       </div>
 
+      <div className="personal-tools">
+        <button className={savedOnly ? 'active' : ''} type="button" onClick={() => { setSavedOnly((value) => !value); setPage(1); }}>★ Saved on this device ({savedJobs.size})</button>
+        <button className={position ? 'active' : ''} type="button" onClick={position ? () => { setPosition(null); setGeoMessage(''); } : useLocation}>{position ? 'Clear radius' : 'Use my location'}</button>
+        <label><span>Within</span><select value={radius} onChange={(event) => { setRadius(Number(event.target.value)); setPage(1); }} disabled={!position}><option value="25">25 miles</option><option value="50">50 miles</option><option value="100">100 miles</option><option value="250">250 miles</option></select></label>
+        {geoMessage && <small role="status">{geoMessage}</small>}
+      </div>
+
       <div className="table-wrap">
         <table>
           <thead><tr><th>Company &amp; position</th><th>Discipline</th><th>Location</th><th>Work mode</th><th>Timing</th><th><span className="sr-only">Apply</span></th></tr></thead>
@@ -201,7 +273,7 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
               const closes = closingLabel(job.closesAt, referenceTime);
               return (
                 <tr key={`${job.company}-${job.jobId}`}>
-                  <td><span className="company-mark">{job.company.slice(0, 2).toUpperCase()}</span><span><strong>{job.title}</strong><small>{job.company} · {label(job.sector)}</small></span></td>
+                  <td><button className={`save-job ${savedJobs.has(jobKey(job)) ? 'saved' : ''}`} type="button" onClick={() => toggleSaved(job)} aria-label={`${savedJobs.has(jobKey(job)) ? 'Remove' : 'Save'} ${job.title}`}>★</button><span className="company-mark">{job.company.slice(0, 2).toUpperCase()}</span><span><strong>{job.title}</strong><small>{job.company} · {label(job.sector)}</small></span></td>
                   <td><span className="tag">{label(job.discipline, 'Engineering')}</span></td>
                   <td className="location-cell"><span title={job.fullLocation}>{job.location}</span></td>
                   <td><span className="mode-label">{label(job.workMode, 'Not listed')}</span></td>

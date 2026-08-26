@@ -41,6 +41,8 @@ jobs:
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       EMAIL_TO: ${{ secrets.EMAIL_TO }}
       SMS_ALERTS_ENABLED: "false"
+      PUBLIC_SUBSCRIPTIONS_ENABLED: "true"
+      AEROSCOUT_PUBLIC_URL: https://aeroscout-internships.brendanlyons07.chatgpt.site
 
     steps:
       - name: Check out the private repository

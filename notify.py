@@ -9,6 +9,7 @@ import smtplib
 from email.utils import getaddresses
 from email.mime.text import MIMEText
 from pathlib import Path
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 
@@ -39,6 +40,10 @@ EMAIL_ALERTS_ENABLED = os.environ.get("EMAIL_ALERTS_ENABLED", "").strip().lower(
     "true",
     "yes",
 )
+PUBLIC_SUBSCRIPTIONS_ENABLED = os.environ.get(
+    "PUBLIC_SUBSCRIPTIONS_ENABLED", ""
+).strip().lower() in ("1", "true", "yes")
+AEROSCOUT_PUBLIC_URL = os.environ.get("AEROSCOUT_PUBLIC_URL", "").strip().rstrip("/")
 
 
 def _email_recipients() -> list[str]:
@@ -107,20 +112,67 @@ def send_text(body: str) -> None:
         resp.raise_for_status()
 
 
-def send_email(subject: str, body: str) -> None:
-    recipients = _email_recipients()
+def send_email_to(recipients: list[str], subject: str, body: str) -> None:
     if not (SMTP_USER and SMTP_PASSWORD and recipients):
         raise RuntimeError("SMTP env vars not set (see .env.example)")
 
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = SMTP_USER
-    msg["To"] = EMAIL_TO
+    msg["To"] = ", ".join(recipients)
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
         server.starttls()
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.send_message(msg, to_addrs=recipients)
+
+
+def send_email(subject: str, body: str) -> None:
+    send_email_to(_email_recipients(), subject, body)
+
+
+def send_subscription_verification(email: str, token: str) -> None:
+    if not AEROSCOUT_PUBLIC_URL:
+        raise RuntimeError("AEROSCOUT_PUBLIC_URL is required for public subscriptions")
+    verification_url = f"{AEROSCOUT_PUBLIC_URL}/verify?{urlencode({'token': token})}"
+    send_email_to(
+        [email],
+        "Confirm your AeroScout internship alerts",
+        "Confirm your AeroScout email alerts by opening this link:\n\n"
+        f"{verification_url}\n\n"
+        "The link expires in 7 days. If you did not request this, ignore this email.",
+    )
+
+
+def send_subscription_digest(email: str, jobs: list[dict], unsubscribe_token: str) -> None:
+    if not AEROSCOUT_PUBLIC_URL:
+        raise RuntimeError("AEROSCOUT_PUBLIC_URL is required for public subscriptions")
+    unsubscribe_url = (
+        f"{AEROSCOUT_PUBLIC_URL}/unsubscribe?"
+        f"{urlencode({'token': unsubscribe_token})}"
+    )
+    lines = [f"{len(jobs)} new matching AeroScout role{'s' if len(jobs) != 1 else ''}", ""]
+    for job in jobs:
+        lines.extend(
+            [
+                f"{job['title']} — {job['company']}",
+                job.get("locations") or "Location not listed",
+                job.get("url") or AEROSCOUT_PUBLIC_URL,
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"Browse all current roles: {AEROSCOUT_PUBLIC_URL}",
+            "",
+            f"Unsubscribe: {unsubscribe_url}",
+        ]
+    )
+    send_email_to(
+        [email],
+        f"AeroScout: {len(jobs)} new matching internship{'s' if len(jobs) != 1 else ''}",
+        "\n".join(lines),
+    )
 
 
 def ensure_opted_in() -> None:

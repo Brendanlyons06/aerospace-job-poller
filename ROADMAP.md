@@ -57,7 +57,7 @@ of already-open internships from being emailed during the expansion.
 - [x] Normalized, deduplicated, compact multi-location display
 - [x] Safe per-source health status and aggregate active-role metrics
 - [x] Sector, company, date, work-mode, and state filters
-- [ ] Radius-based geographic search
+- [x] Browser-location radius search for source-provided coordinates
 - [x] Pagination and sorting
 
 The first dashboard slice is implemented in `dashboard/`. It displays a safe
@@ -67,11 +67,14 @@ job-listing fields, aggregate metrics, and non-sensitive source status;
 notification records, raw source errors, and poller-control tables remain
 inaccessible.
 
-## Phase 5 — accounts and email subscriptions
+## Phase 5 — email subscriptions — beta implemented
 
-- Authentication, saved searches, and verified email addresses
-- Immediate, daily, and weekly notification frequencies
-- Filter-matched subscriptions, delivery history, and unsubscribe controls
+- [x] Self-service verified email addresses without paid authentication
+- [x] Filter-matched daily and weekly digests
+- [x] Unsubscribe controls, bounded delivery, and a 100-subscriber free cap
+- [x] Device-local saved jobs
+- [ ] Cross-device accounts and saved searches
+- [ ] Immediate per-job alerts after a transactional email provider is added
 
 ## Phase 6 — opt-in SMS
 

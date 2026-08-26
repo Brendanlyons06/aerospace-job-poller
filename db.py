@@ -13,6 +13,7 @@ import atexit
 import json
 import os
 import sqlite3
+import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -109,6 +110,26 @@ CREATE TABLE IF NOT EXISTS system_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS email_subscriptions (
+    email TEXT PRIMARY KEY,
+    frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly')),
+    discipline TEXT,
+    sector TEXT,
+    company TEXT,
+    state TEXT,
+    verification_token TEXT NOT NULL,
+    unsubscribe_token TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    verification_requested_at TEXT NOT NULL,
+    verification_sent_at TEXT,
+    confirmed_at TEXT,
+    unsubscribed_at TEXT,
+    last_digest_at TEXT,
+    next_digest_at TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+);
 """
 
 _POSTGRES_CONNECTION = None
@@ -178,8 +199,57 @@ def _validate_database_url_shape(database_url: str) -> None:
 
 
 def _migration_statements(contents: str) -> list[str]:
-    """Split the deliberately simple SQL migration files into statements."""
-    return [statement.strip() for statement in contents.split(";") if statement.strip()]
+    """Split SQL while preserving quoted strings and dollar-quoted functions."""
+    statements = []
+    start = 0
+    index = 0
+    quote = None
+    dollar_tag = None
+    while index < len(contents):
+        if dollar_tag:
+            if contents.startswith(dollar_tag, index):
+                index += len(dollar_tag)
+                dollar_tag = None
+            else:
+                index += 1
+            continue
+        character = contents[index]
+        if quote:
+            if character == quote:
+                if index + 1 < len(contents) and contents[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if contents.startswith("--", index):
+            newline = contents.find("\n", index + 2)
+            index = len(contents) if newline < 0 else newline + 1
+            continue
+        if contents.startswith("/*", index):
+            close = contents.find("*/", index + 2)
+            index = len(contents) if close < 0 else close + 2
+            continue
+        if character in {"'", '"'}:
+            quote = character
+            index += 1
+            continue
+        if character == "$":
+            match = re.match(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$", contents[index:])
+            if match:
+                dollar_tag = match.group(0)
+                index += len(dollar_tag)
+                continue
+        if character == ";":
+            statement = contents[start:index].strip()
+            if statement:
+                statements.append(statement)
+            start = index + 1
+        index += 1
+    tail = contents[start:].strip()
+    if tail:
+        statements.append(tail)
+    return statements
 
 
 def _apply_postgres_migrations(conn) -> None:
@@ -646,5 +716,139 @@ def mark_poll_completed(*, now: datetime | None = None) -> None:
             "INSERT INTO system_meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("last_poll_completed_at", now.isoformat()),
+        )
+        conn.commit()
+
+
+def pending_subscription_verifications(*, limit: int = 10) -> list[dict]:
+    """Return pending confirmations that have not yet received an email."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    with _connection() as conn:
+        rows = _execute(
+            conn,
+            "SELECT email, verification_token, frequency, discipline, sector, "
+            "company, state FROM email_subscriptions "
+            "WHERE confirmed_at IS NULL AND unsubscribed_at IS NULL "
+            "AND verification_sent_at IS NULL AND verification_requested_at >= ? "
+            "ORDER BY verification_requested_at LIMIT ?",
+            (cutoff, max(1, min(limit, 25))),
+        ).fetchall()
+    return [
+        {
+            "email": row[0],
+            "verification_token": row[1],
+            "frequency": row[2],
+            "discipline": row[3],
+            "sector": row[4],
+            "company": row[5],
+            "state": row[6],
+        }
+        for row in rows
+    ]
+
+
+def mark_subscription_verification_sent(
+    email: str, *, now: datetime | None = None
+) -> None:
+    now = now or datetime.now(timezone.utc)
+    with _connection() as conn:
+        _execute(
+            conn,
+            "UPDATE email_subscriptions SET verification_sent_at = ?, last_error = NULL "
+            "WHERE email = ? AND confirmed_at IS NULL",
+            (now.isoformat(), email),
+        )
+        conn.commit()
+
+
+def mark_subscription_delivery_failed(email: str, error: str) -> None:
+    """Record a delivery failure without exposing it through the dashboard."""
+    with _connection() as conn:
+        _execute(
+            conn,
+            "UPDATE email_subscriptions SET consecutive_failures = "
+            "consecutive_failures + 1, last_error = ? WHERE email = ?",
+            (error[:1000], email),
+        )
+        conn.commit()
+
+
+def due_subscription_digests(
+    *, now: datetime | None = None, limit: int = 20
+) -> list[dict]:
+    """Return due subscribers with matching jobs discovered since their last digest."""
+    now = now or datetime.now(timezone.utc)
+    with _connection() as conn:
+        subscriptions = _execute(
+            conn,
+            "SELECT email, frequency, discipline, sector, company, state, "
+            "unsubscribe_token, COALESCE(last_digest_at, confirmed_at) "
+            "FROM email_subscriptions WHERE confirmed_at IS NOT NULL "
+            "AND unsubscribed_at IS NULL AND next_digest_at <= ? "
+            "ORDER BY next_digest_at, email LIMIT ?",
+            (now.isoformat(), max(1, min(limit, 100))),
+        ).fetchall()
+
+        digests = []
+        for subscription in subscriptions:
+            email, frequency, discipline, sector, company, state, token, cutoff = subscription
+            conditions = ["j.closed_at IS NULL", "j.first_seen > ?"]
+            parameters: list[object] = [cutoff]
+            if discipline:
+                conditions.append("j.discipline = ?")
+                parameters.append(discipline)
+            if sector:
+                conditions.append("j.sector = ?")
+                parameters.append(sector)
+            if company:
+                conditions.append("j.company = ?")
+                parameters.append(company)
+            if state:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM job_locations AS jl "
+                    "WHERE jl.company = j.company AND jl.job_id = j.job_id "
+                    "AND UPPER(jl.state) = ?)"
+                )
+                parameters.append(state.upper())
+            rows = _execute(
+                conn,
+                "SELECT j.company, j.title, j.locations, j.url, j.first_seen "
+                "FROM jobs AS j WHERE " + " AND ".join(conditions) +
+                " ORDER BY j.first_seen DESC LIMIT 25",
+                tuple(parameters),
+            ).fetchall()
+            digests.append(
+                {
+                    "email": email,
+                    "frequency": frequency,
+                    "unsubscribe_token": token,
+                    "jobs": [
+                        {
+                            "company": row[0],
+                            "title": row[1],
+                            "locations": row[2],
+                            "url": row[3],
+                            "first_seen": row[4],
+                        }
+                        for row in rows
+                    ],
+                }
+            )
+        return digests
+
+
+def mark_subscription_digest_complete(
+    email: str, frequency: str, *, now: datetime | None = None
+) -> None:
+    """Advance a digest whether or not it contained new matching jobs."""
+    now = now or datetime.now(timezone.utc)
+    interval = timedelta(days=7 if frequency == "weekly" else 1)
+    with _connection() as conn:
+        _execute(
+            conn,
+            "UPDATE email_subscriptions SET last_digest_at = ?, next_digest_at = ?, "
+            "consecutive_failures = 0, last_error = NULL WHERE email = ? "
+            "AND unsubscribed_at IS NULL",
+            (now.isoformat(), (now + interval).isoformat(), email),
         )
         conn.commit()

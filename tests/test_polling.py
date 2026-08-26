@@ -982,6 +982,51 @@ class DatabaseDiffTests(unittest.TestCase):
             connection.close()
         self.assertEqual(stored, completed.isoformat())
 
+    def test_subscription_verifications_and_filtered_digests_are_bounded(self) -> None:
+        now = datetime.now(timezone.utc)
+        posting = job("digest", "Mechanical Engineering Intern") | {
+            "locations": ["Long Beach, CA"]
+        }
+        db.sync_and_get_new("SpaceX", [posting])
+        connection = db._connect()
+        try:
+            connection.execute(
+                "INSERT INTO email_subscriptions (email, frequency, discipline, sector, "
+                "company, state, verification_token, unsubscribe_token, created_at, "
+                "verification_requested_at) VALUES (?, 'daily', NULL, NULL, NULL, NULL, "
+                "'verify-me', 'unsubscribe-me', ?, ?)",
+                ("pending@example.test", now.isoformat(), now.isoformat()),
+            )
+            connection.execute(
+                "INSERT INTO email_subscriptions (email, frequency, discipline, sector, "
+                "company, state, verification_token, unsubscribe_token, created_at, "
+                "verification_requested_at, verification_sent_at, confirmed_at, next_digest_at) "
+                "VALUES (?, 'daily', 'mechanical', NULL, 'SpaceX', 'CA', 'verified', "
+                "'unsubscribe-digest', ?, ?, ?, ?, ?)",
+                (
+                    "digest@example.test",
+                    (now - timedelta(days=2)).isoformat(),
+                    (now - timedelta(days=2)).isoformat(),
+                    (now - timedelta(days=2)).isoformat(),
+                    (now - timedelta(days=2)).isoformat(),
+                    (now - timedelta(hours=1)).isoformat(),
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        pending = db.pending_subscription_verifications(limit=1)
+        self.assertEqual(pending[0]["email"], "pending@example.test")
+        db.mark_subscription_verification_sent("pending@example.test", now=now)
+        self.assertEqual(db.pending_subscription_verifications(), [])
+
+        digests = db.due_subscription_digests(now=now, limit=1)
+        self.assertEqual(digests[0]["email"], "digest@example.test")
+        self.assertEqual([item["title"] for item in digests[0]["jobs"]], ["Mechanical Engineering Intern"])
+        db.mark_subscription_digest_complete("digest@example.test", "daily", now=now)
+        self.assertEqual(db.due_subscription_digests(now=now), [])
+
     def test_dashboard_rows_and_two_poll_closure_lifecycle(self) -> None:
         posting = job("phase-2", "Mechanical Design Engineering Intern") | {
             "locations": ["Long Beach, CA"],
@@ -1115,6 +1160,12 @@ class DatabaseConfigurationTests(unittest.TestCase):
             ("Example", "123"),
         )
 
+    def test_migration_splitter_preserves_dollar_quoted_function_bodies(self) -> None:
+        contents = "CREATE TABLE sample (id INTEGER); CREATE FUNCTION f() RETURNS void AS $$ BEGIN PERFORM 1; END; $$ LANGUAGE plpgsql;"
+        statements = db._migration_statements(contents)
+        self.assertEqual(len(statements), 2)
+        self.assertIn("PERFORM 1; END;", statements[1])
+
     def test_supabase_pooler_requires_project_reference_in_username(self) -> None:
         invalid_url = (
             "postgresql://postgres:encoded-password@"
@@ -1169,6 +1220,14 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("GRANT SELECT ON public.dashboard_sources TO anon", health_migration)
         self.assertNotIn("last_error", health_migration)
         self.assertNotIn("notification_outbox", health_migration)
+        subscription_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "006_public_email_subscriptions.sql"
+        ).read_text()
+        self.assertIn("ALTER TABLE public.email_subscriptions ENABLE ROW LEVEL SECURITY", subscription_migration)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.request_email_subscription", subscription_migration)
+        self.assertIn("confirmed_at IS NOT NULL AND unsubscribed_at IS NULL", subscription_migration)
+        self.assertIn("100 AS subscriber_cap", subscription_migration)
+        self.assertNotIn("GRANT SELECT ON public.email_subscriptions", subscription_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
@@ -1338,3 +1397,14 @@ class EmailNotificationTests(unittest.TestCase):
         self.assertEqual(message["From"], "sender@example.test")
         self.assertEqual(message["To"], "recipient@example.test")
         self.assertEqual(message.get_payload(), "A new role is available")
+
+    def test_subscription_verification_uses_public_confirmation_link(self) -> None:
+        with (
+            patch.object(notify, "AEROSCOUT_PUBLIC_URL", "https://aeroscout.example"),
+            patch.object(notify, "send_email_to") as send_email_to,
+        ):
+            notify.send_subscription_verification("friend@example.test", "token-123")
+        recipients, subject, body = send_email_to.call_args.args
+        self.assertEqual(recipients, ["friend@example.test"])
+        self.assertIn("Confirm", subject)
+        self.assertIn("https://aeroscout.example/verify?token=token-123", body)
