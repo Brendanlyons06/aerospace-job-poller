@@ -46,7 +46,7 @@ function ageLabel(value: string, referenceTime: number) {
   if (days === 0) return 'Today';
   if (days === 1) return 'Yesterday';
   if (days < 7) return `${days} days ago`;
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(value));
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(value));
 }
 
 function closingLabel(value: string | null, referenceTime: number) {
@@ -57,7 +57,7 @@ function closingLabel(value: string | null, referenceTime: number) {
   if (days < 0) return 'Deadline passed';
   if (days === 0) return 'Closes today';
   if (days <= 14) return `Closes in ${days} ${days === 1 ? 'day' : 'days'}`;
-  return `Closes ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date)}`;
+  return `Closes ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date)}`;
 }
 
 function checkedLabel(value: string | null, referenceTime: number) {
