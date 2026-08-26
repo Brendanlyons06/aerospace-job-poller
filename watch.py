@@ -60,6 +60,9 @@ def _process_public_subscriptions() -> None:
     if not notify.PUBLIC_SUBSCRIPTIONS_ENABLED:
         return
     for subscription in db.pending_subscription_verifications(limit=10):
+        if not db.public_email_send_available():
+            print("PUBLIC EMAIL DAILY CAP REACHED; remaining deliveries deferred")
+            break
         try:
             notify.send_subscription_verification(
                 subscription["email"], subscription["verification_token"]
@@ -70,11 +73,15 @@ def _process_public_subscriptions() -> None:
             )
             print(f"SUBSCRIPTION VERIFICATION FAILED: {type(exc).__name__}: {exc}")
         else:
+            db.record_public_email_sent()
             db.mark_subscription_verification_sent(subscription["email"])
 
     for digest in db.due_subscription_digests(limit=20):
         try:
             if digest["jobs"]:
+                if not db.public_email_send_available():
+                    print("PUBLIC EMAIL DAILY CAP REACHED; remaining deliveries deferred")
+                    break
                 notify.send_subscription_digest(
                     digest["email"], digest["jobs"], digest["unsubscribe_token"]
                 )
@@ -84,6 +91,8 @@ def _process_public_subscriptions() -> None:
             )
             print(f"SUBSCRIPTION DIGEST FAILED: {type(exc).__name__}: {exc}")
         else:
+            if digest["jobs"]:
+                db.record_public_email_sent()
             db.mark_subscription_digest_complete(digest["email"], digest["frequency"])
 
 

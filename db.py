@@ -773,6 +773,33 @@ def mark_subscription_delivery_failed(email: str, error: str) -> None:
         conn.commit()
 
 
+def public_email_send_available(
+    *, now: datetime | None = None, daily_cap: int = 200
+) -> bool:
+    """Keep public delivery below a conservative daily Gmail allowance."""
+    now = now or datetime.now(timezone.utc)
+    key = f"public_email_sent_{now.date().isoformat()}"
+    with _connection() as conn:
+        row = _execute(
+            conn, "SELECT value FROM system_meta WHERE key = ?", (key,)
+        ).fetchone()
+        return int(row[0]) < daily_cap if row else True
+
+
+def record_public_email_sent(*, now: datetime | None = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    key = f"public_email_sent_{now.date().isoformat()}"
+    with _connection() as conn:
+        _execute(
+            conn,
+            "INSERT INTO system_meta (key, value) VALUES (?, '1') "
+            "ON CONFLICT(key) DO UPDATE SET value = "
+            "CAST(CAST(system_meta.value AS INTEGER) + 1 AS TEXT)",
+            (key,),
+        )
+        conn.commit()
+
+
 def due_subscription_digests(
     *, now: datetime | None = None, limit: int = 20
 ) -> list[dict]:

@@ -214,7 +214,8 @@ dashboard API.
 
 The initial public beta has a hard database cap of 100 confirmed subscribers.
 Confirmation requests are limited to 20 per hour, verification emails to 10
-per poll, and digests to 20 per poll. These guardrails keep the existing Gmail
+per poll, digests to 20 per poll, and all public delivery to 200 emails per
+day. These guardrails keep the existing Gmail
 sender well below its consumer-account ceiling and prevent one burst of
 signups from consuming the free allowance. Gmail is appropriate for this
 small private beta, but a transactional sender should replace it before the

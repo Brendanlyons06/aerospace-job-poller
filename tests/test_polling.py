@@ -1027,6 +1027,12 @@ class DatabaseDiffTests(unittest.TestCase):
         db.mark_subscription_digest_complete("digest@example.test", "daily", now=now)
         self.assertEqual(db.due_subscription_digests(now=now), [])
 
+        self.assertTrue(db.public_email_send_available(now=now, daily_cap=2))
+        db.record_public_email_sent(now=now)
+        self.assertTrue(db.public_email_send_available(now=now, daily_cap=2))
+        db.record_public_email_sent(now=now)
+        self.assertFalse(db.public_email_send_available(now=now, daily_cap=2))
+
     def test_dashboard_rows_and_two_poll_closure_lifecycle(self) -> None:
         posting = job("phase-2", "Mechanical Design Engineering Intern") | {
             "locations": ["Long Beach, CA"],
