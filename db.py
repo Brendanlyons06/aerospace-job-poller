@@ -729,7 +729,7 @@ def pending_subscription_verifications(*, limit: int = 10) -> list[dict]:
     with _connection() as conn:
         rows = _execute(
             conn,
-            "SELECT email, verification_token, frequency, discipline, sector, "
+            "SELECT email, verification_token, unsubscribe_token, frequency, discipline, sector, "
             "company, state FROM email_subscriptions "
             "WHERE confirmed_at IS NULL AND unsubscribed_at IS NULL "
             "AND verification_sent_at IS NULL AND verification_requested_at >= ? "
@@ -740,11 +740,12 @@ def pending_subscription_verifications(*, limit: int = 10) -> list[dict]:
         {
             "email": row[0],
             "verification_token": row[1],
-            "frequency": row[2],
-            "discipline": row[3],
-            "sector": row[4],
-            "company": row[5],
-            "state": row[6],
+            "unsubscribe_token": row[2],
+            "frequency": row[3],
+            "discipline": row[4],
+            "sector": row[5],
+            "company": row[6],
+            "state": row[7],
         }
         for row in rows
     ]

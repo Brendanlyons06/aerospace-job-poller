@@ -136,17 +136,20 @@ def send_email(subject: str, body: str) -> None:
     send_email_to(_email_recipients(), subject, body)
 
 
-def send_subscription_verification(email: str, token: str) -> None:
+def send_subscription_verification(email: str, token: str, manage_token: str) -> None:
     if not AEROSCOUT_PUBLIC_URL:
         raise RuntimeError("AEROSCOUT_PUBLIC_URL is required for public subscriptions")
     verification_url = f"{AEROSCOUT_PUBLIC_URL}/verify?{urlencode({'token': token})}"
+    manage_url = f"{AEROSCOUT_PUBLIC_URL}/manage?{urlencode({'token': manage_token})}"
     send_email_to(
         [email],
         "Confirm your AeroScout internship alerts",
         "Confirm your AeroScout email alerts by opening this link:\n\n"
         f"{verification_url}\n\n"
         "The link expires in 7 days. Digests arrive at about 9:15 AM Pacific "
-        "on your selected schedule. If you did not request this, ignore this email.",
+        "on your selected schedule.\n\n"
+        f"After confirming, manage or delete your alert here:\n{manage_url}\n\n"
+        "If you did not request this, ignore this email.",
     )
 
 

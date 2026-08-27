@@ -81,7 +81,8 @@ def _process_public_subscriptions() -> None:
             break
         try:
             notify.send_subscription_verification(
-                subscription["email"], subscription["verification_token"]
+                subscription["email"], subscription["verification_token"],
+                subscription["unsubscribe_token"]
             )
         except Exception as exc:
             db.mark_subscription_delivery_failed(

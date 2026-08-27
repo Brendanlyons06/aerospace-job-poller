@@ -1483,11 +1483,14 @@ class EmailNotificationTests(unittest.TestCase):
             patch.object(notify, "AEROSCOUT_PUBLIC_URL", "https://aeroscout.example"),
             patch.object(notify, "send_email_to") as send_email_to,
         ):
-            notify.send_subscription_verification("friend@example.test", "token-123")
+            notify.send_subscription_verification(
+                "friend@example.test", "token-123", "manage-123"
+            )
         recipients, subject, body = send_email_to.call_args.args
         self.assertEqual(recipients, ["friend@example.test"])
         self.assertIn("Confirm", subject)
         self.assertIn("https://aeroscout.example/verify?token=token-123", body)
+        self.assertIn("https://aeroscout.example/manage?token=manage-123", body)
         self.assertIn("9:15 AM Pacific", body)
 
     def test_subscription_digest_includes_manage_and_unsubscribe_links(self) -> None:
