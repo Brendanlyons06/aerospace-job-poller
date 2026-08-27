@@ -56,7 +56,7 @@ of already-open internships from being emailed during the expansion.
 - [x] Last-completed-poll freshness indicator
 - [x] Normalized, deduplicated, compact multi-location display
 - [x] Safe per-source health status and aggregate active-role metrics
-- [x] Sector, company, date, work-mode, and state filters
+- [x] Sector, company, date, work-mode, and multi-state filters
 - [x] Browser-location radius search for source-provided coordinates
 - [x] Pagination and sorting
 
@@ -73,6 +73,8 @@ inaccessible.
 - [x] Filter-matched daily and weekly digests
 - [x] Unsubscribe controls, bounded delivery, and a 100-subscriber free cap
 - [x] Self-service alert preferences and permanent subscription-data deletion
+- [x] Passwordless management-link recovery from the public dashboard
+- [x] Multi-state and remote matching for dashboard searches and email digests
 - [x] Predictable 9:15 AM Pacific daily and Monday weekly delivery windows
 - [x] Privacy, Terms, Contact, and private aggregate owner reporting
 - [x] Device-local saved jobs

@@ -121,11 +121,14 @@ CREATE TABLE IF NOT EXISTS email_subscriptions (
     sector TEXT,
     company TEXT,
     state TEXT,
+    states TEXT,
     verification_token TEXT NOT NULL,
     unsubscribe_token TEXT NOT NULL,
     created_at TEXT NOT NULL,
     verification_requested_at TEXT NOT NULL,
     verification_sent_at TEXT,
+    manage_requested_at TEXT,
+    manage_sent_at TEXT,
     confirmed_at TEXT,
     unsubscribed_at TEXT,
     last_digest_at TEXT,
@@ -153,6 +156,12 @@ _SQLITE_JOB_COLUMNS = {
     "compensation_max": "REAL",
     "compensation_currency": "TEXT",
     "compensation_period": "TEXT",
+}
+
+_SQLITE_SUBSCRIPTION_COLUMNS = {
+    "states": "TEXT",
+    "manage_requested_at": "TEXT",
+    "manage_sent_at": "TEXT",
 }
 
 
@@ -353,6 +362,19 @@ def _upgrade_sqlite_schema(conn: sqlite3.Connection) -> None:
         if name not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
     conn.execute("UPDATE jobs SET last_seen = first_seen WHERE last_seen IS NULL")
+    subscription_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(email_subscriptions)").fetchall()
+    }
+    for name, definition in _SQLITE_SUBSCRIPTION_COLUMNS.items():
+        if name not in subscription_columns:
+            conn.execute(
+                f"ALTER TABLE email_subscriptions ADD COLUMN {name} {definition}"
+            )
+    conn.execute(
+        "UPDATE email_subscriptions SET states = UPPER(state) "
+        "WHERE states IS NULL AND state IS NOT NULL"
+    )
     conn.commit()
 
 
@@ -780,6 +802,35 @@ def mark_subscription_verification_sent(
         conn.commit()
 
 
+def pending_subscription_management_emails(*, limit: int = 10) -> list[dict]:
+    """Return verified subscribers waiting for a fresh private management link."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    with _connection() as conn:
+        rows = _execute(
+            conn,
+            "SELECT email, unsubscribe_token FROM email_subscriptions "
+            "WHERE confirmed_at IS NOT NULL AND unsubscribed_at IS NULL "
+            "AND manage_requested_at IS NOT NULL AND manage_sent_at IS NULL "
+            "AND manage_requested_at >= ? ORDER BY manage_requested_at LIMIT ?",
+            (cutoff, max(1, min(limit, 25))),
+        ).fetchall()
+    return [{"email": row[0], "manage_token": row[1]} for row in rows]
+
+
+def mark_subscription_management_sent(
+    email: str, *, now: datetime | None = None
+) -> None:
+    now = now or datetime.now(timezone.utc)
+    with _connection() as conn:
+        _execute(
+            conn,
+            "UPDATE email_subscriptions SET manage_sent_at = ?, last_error = NULL "
+            "WHERE email = ? AND confirmed_at IS NOT NULL AND unsubscribed_at IS NULL",
+            (now.isoformat(), email),
+        )
+        conn.commit()
+
+
 def mark_subscription_delivery_failed(email: str, error: str) -> None:
     """Record a delivery failure without exposing it through the dashboard."""
     with _connection() as conn:
@@ -855,7 +906,7 @@ def due_subscription_digests(
     with _connection() as conn:
         subscriptions = _execute(
             conn,
-            "SELECT email, frequency, discipline, sector, company, state, "
+            "SELECT email, frequency, discipline, sector, company, state, states, "
             "unsubscribe_token, COALESCE(last_digest_at, confirmed_at) "
             "FROM email_subscriptions WHERE confirmed_at IS NOT NULL "
             "AND unsubscribed_at IS NULL AND next_digest_at <= ? "
@@ -865,7 +916,7 @@ def due_subscription_digests(
 
         digests = []
         for subscription in subscriptions:
-            email, frequency, discipline, sector, company, state, token, cutoff = subscription
+            email, frequency, discipline, sector, company, state, states, token, cutoff = subscription
             conditions = ["j.closed_at IS NULL", "j.first_seen > ?"]
             parameters: list[object] = [cutoff]
             if discipline:
@@ -877,13 +928,25 @@ def due_subscription_digests(
             if company:
                 conditions.append("j.company = ?")
                 parameters.append(company)
-            if state:
-                conditions.append(
+            selected_states = [
+                value.strip().upper()
+                for value in (states or state or "").split(",")
+                if value.strip()
+            ]
+            geographic_states = [value for value in selected_states if value != "REMOTE"]
+            location_filters = []
+            if geographic_states:
+                placeholders = ", ".join("?" for _ in geographic_states)
+                location_filters.append(
                     "EXISTS (SELECT 1 FROM job_locations AS jl "
                     "WHERE jl.company = j.company AND jl.job_id = j.job_id "
-                    "AND UPPER(jl.state) = ?)"
+                    f"AND UPPER(jl.state) IN ({placeholders}))"
                 )
-                parameters.append(state.upper())
+                parameters.extend(geographic_states)
+            if "REMOTE" in selected_states:
+                location_filters.append("j.work_mode = 'remote'")
+            if location_filters:
+                conditions.append("(" + " OR ".join(location_filters) + ")")
             rows = _execute(
                 conn,
                 "SELECT j.company, j.title, j.locations, j.url, j.first_seen "

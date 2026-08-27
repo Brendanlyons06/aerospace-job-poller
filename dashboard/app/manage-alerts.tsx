@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-html-link-for-pages -- native navigation avoids the hosted router interception bug */
 
 import { FormEvent, useEffect, useState } from 'react';
+import MultiStateSelect from './multi-state-select';
 
 type Option = { value: string; label: string };
 type Preferences = {
@@ -11,9 +12,10 @@ type Preferences = {
   sector: string;
   company: string;
   state: string;
+  states: string[];
 };
 
-const emptyPreferences: Preferences = { frequency: 'daily', discipline: '', sector: '', company: '', state: '' };
+const emptyPreferences: Preferences = { frequency: 'daily', discipline: '', sector: '', company: '', state: '', states: [] };
 
 export default function ManageAlerts({ token, disciplines, sectors, companies, states }: {
   token: string;
@@ -40,7 +42,9 @@ export default function ManageAlerts({ token, disciplines, sectors, companies, s
         if (!active) return;
         setPreferences({
           frequency: result.frequency === 'weekly' ? 'weekly' : 'daily',
-          discipline: result.discipline || '', sector: result.sector || '', company: result.company || '', state: result.state || '',
+          discipline: result.discipline || '', sector: result.sector || '', company: result.company || '',
+          state: result.state || '',
+          states: Array.isArray(result.states) ? result.states : (result.state ? [result.state] : []),
         });
         setSubscriptionStatus(result.status as 'active' | 'unsubscribed');
         setStatus('ready');
@@ -93,6 +97,10 @@ export default function ManageAlerts({ token, disciplines, sectors, companies, s
   const optionWithCurrent = (items: Option[], current: string) => current && !items.some((item) => item.value === current)
     ? [{ value: current, label: current }, ...items] : items;
   const stringWithCurrent = (items: string[], current: string) => current && !items.includes(current) ? [current, ...items] : items;
+  const stateOptions = [
+    { value: 'REMOTE', label: 'Remote / location-independent' },
+    ...[...new Set([...states, ...preferences.states.filter((item) => item !== 'REMOTE')])].sort().map((item) => ({ value: item, label: item })),
+  ];
 
   return (
     <div className="action-card manage-card">
@@ -104,7 +112,7 @@ export default function ManageAlerts({ token, disciplines, sectors, companies, s
         <label><span>Discipline</span><select value={preferences.discipline} onChange={(event) => setPreferences({ ...preferences, discipline: event.target.value })}><option value="">All disciplines</option>{optionWithCurrent(disciplines, preferences.discipline).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
         <label><span>Sector</span><select value={preferences.sector} onChange={(event) => setPreferences({ ...preferences, sector: event.target.value })}><option value="">All sectors</option>{optionWithCurrent(sectors, preferences.sector).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
         <label><span>Company</span><select value={preferences.company} onChange={(event) => setPreferences({ ...preferences, company: event.target.value })}><option value="">All companies</option>{stringWithCurrent(companies, preferences.company).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label><span>State</span><select value={preferences.state} onChange={(event) => setPreferences({ ...preferences, state: event.target.value })}><option value="">All states</option>{stringWithCurrent(states, preferences.state).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <div className="manage-state-select"><span>States &amp; remote</span><MultiStateSelect values={preferences.states} options={stateOptions} onChange={(values) => setPreferences({ ...preferences, states: values, state: values[0] || '' })} allLabel="All locations" /></div>
         <button type="submit" disabled={status === 'saving' || status === 'deleting'}>{status === 'saving' ? 'Saving…' : 'Save preferences'}</button>
       </form>
       {message && <p className={`manage-message ${status === 'saved' ? 'success' : 'error'}`} role="status">{message}</p>}

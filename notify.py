@@ -153,6 +153,21 @@ def send_subscription_verification(email: str, token: str, manage_token: str) ->
     )
 
 
+def send_subscription_management_link(email: str, manage_token: str) -> None:
+    if not AEROSCOUT_PUBLIC_URL:
+        raise RuntimeError("AEROSCOUT_PUBLIC_URL is required for public subscriptions")
+    manage_url = f"{AEROSCOUT_PUBLIC_URL}/manage?{urlencode({'token': manage_token})}"
+    send_email_to(
+        [email],
+        "Manage your AeroScout internship alerts",
+        "Open your private AeroScout subscription settings here:\n\n"
+        f"{manage_url}\n\n"
+        "This link lets you update your filters, unsubscribe, or permanently "
+        "delete your subscription. Keep it private.\n\n"
+        "If you did not request this email, you can safely ignore it.",
+    )
+
+
 def send_subscription_digest(email: str, jobs: list[dict], unsubscribe_token: str) -> None:
     if not AEROSCOUT_PUBLIC_URL:
         raise RuntimeError("AEROSCOUT_PUBLIC_URL is required for public subscriptions")

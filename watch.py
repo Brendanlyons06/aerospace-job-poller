@@ -93,6 +93,23 @@ def _process_public_subscriptions() -> None:
             db.record_public_email_sent()
             db.mark_subscription_verification_sent(subscription["email"])
 
+    for subscription in db.pending_subscription_management_emails(limit=10):
+        if not db.public_email_send_available():
+            print("PUBLIC EMAIL DAILY CAP REACHED; remaining deliveries deferred")
+            break
+        try:
+            notify.send_subscription_management_link(
+                subscription["email"], subscription["manage_token"]
+            )
+        except Exception as exc:
+            db.mark_subscription_delivery_failed(
+                subscription["email"], f"{type(exc).__name__}: {exc}"
+            )
+            print(f"SUBSCRIPTION MANAGEMENT EMAIL FAILED: {type(exc).__name__}: {exc}")
+        else:
+            db.record_public_email_sent()
+            db.mark_subscription_management_sent(subscription["email"])
+
     for digest in db.due_subscription_digests(limit=20):
         try:
             if digest["jobs"]:

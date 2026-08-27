@@ -195,7 +195,7 @@ tracked in [`ROADMAP.md`](ROADMAP.md).
 ## AeroScout dashboard
 
 Phase 4 includes a responsive current-opportunity table with keyword search,
-discipline, sector, company, work-mode, state, and discovery-date filters;
+discipline, sector, company, work-mode, multi-state, and discovery-date filters;
 sorting, pagination, closing-date labels, source-health status, and direct
 application links. The Engineering & STEM Internship Finder reads active
 postings through restricted Supabase views. Migrations
@@ -207,11 +207,17 @@ notification history, and poller-control data remain inaccessible.
 The dashboard also includes device-local saved jobs, browser-location radius
 filtering for postings whose source supplies coordinates, and a public email
 subscription form. Subscribers select optional discipline, sector, company,
-and state filters, confirm their email through a seven-day link, and receive
+multi-state, and remote filters, confirm their email through a seven-day link, and receive
 daily digests or Monday weekly digests at about 9:15 AM Pacific. Every digest
 has private links to change filters, unsubscribe, or permanently delete the
 subscription. Subscriber addresses, delivery errors, and tokens are protected
 by row-level security and are never exposed through the dashboard API.
+
+Confirmed subscribers can request a fresh private management link from the
+main dashboard by entering their email address. The response is intentionally
+the same whether or not an active subscription exists, preventing email-address
+discovery. Requests are rate-limited, and only possession of the emailed,
+unguessable token permits preference changes, unsubscription, or deletion.
 
 The initial public beta has a hard database cap of 100 confirmed subscribers.
 Confirmation requests are limited to 20 per hour, verification emails to 10

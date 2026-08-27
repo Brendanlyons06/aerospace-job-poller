@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DashboardJob, DashboardSource } from '../lib/jobs';
+import MultiStateSelect from './multi-state-select';
 import SubscriptionForm from './subscription-form';
 
 const PAGE_SIZE = 25;
@@ -97,7 +98,7 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
   const [sector, setSector] = useState('all');
   const [company, setCompany] = useState('all');
   const [workMode, setWorkMode] = useState('all');
-  const [state, setState] = useState('all');
+  const [selectedStates, setSelectedStates] = useState<string[]>([]);
   const [freshness, setFreshness] = useState('all');
   const [sort, setSort] = useState('newest');
   const [page, setPage] = useState(1);
@@ -148,11 +149,14 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
       const searchable = [job.title, job.company, job.fullLocation, label(job.discipline), label(job.sector), label(job.workMode)].filter(Boolean).join(' ').toLowerCase();
       const discoveredAge = referenceTime - timestamp(job.firstSeen);
       const inRadius = !position || job.locationCoordinates.some((coordinates) => distanceMiles(position, coordinates) <= radius);
+      const inSelectedLocation = selectedStates.length === 0 || selectedStates.some((selected) => (
+        selected === 'REMOTE' ? job.workMode === 'remote' : job.locationStates.includes(selected)
+      ));
       return (discipline === 'all' || job.discipline === discipline)
         && (sector === 'all' || job.sector === sector)
         && (company === 'all' || job.company === company)
         && (workMode === 'all' || job.workMode === workMode)
-        && (state === 'all' || job.locationStates.includes(state))
+        && inSelectedLocation
         && (maxAge === null || discoveredAge <= maxAge)
         && (!savedOnly || savedJobs.has(jobKey(job)))
         && inRadius
@@ -169,11 +173,11 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
       }
       return timestamp(b.firstSeen) - timestamp(a.firstSeen);
     });
-  }, [company, discipline, freshness, jobs, position, query, radius, referenceTime, savedJobs, savedOnly, sector, sort, state, workMode]);
+  }, [company, discipline, freshness, jobs, position, query, radius, referenceTime, savedJobs, savedOnly, sector, selectedStates, sort, workMode]);
 
   const pageCount = Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE));
   const visibleJobs = filteredJobs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const filtersActive = Boolean(query || discipline !== 'all' || sector !== 'all' || company !== 'all' || workMode !== 'all' || state !== 'all' || freshness !== 'all' || savedOnly || position);
+  const filtersActive = Boolean(query || discipline !== 'all' || sector !== 'all' || company !== 'all' || workMode !== 'all' || selectedStates.length || freshness !== 'all' || savedOnly || position);
   const attentionSources = sources.filter((source) => source.status === 'degraded' || source.status === 'failing');
   const orderedSources = [...sources].sort((a, b) => {
     const priority = { failing: 0, degraded: 1, pending: 2, 'no-open-roles': 3, healthy: 4 };
@@ -182,7 +186,7 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
 
   const clearFilters = () => {
     setQuery(''); setDiscipline('all'); setSector('all'); setCompany('all');
-    setWorkMode('all'); setState('all'); setFreshness('all'); setSort('newest'); setSavedOnly(false); setPosition(null); setGeoMessage(''); setPage(1);
+    setWorkMode('all'); setSelectedStates([]); setFreshness('all'); setSort('newest'); setSavedOnly(false); setPosition(null); setGeoMessage(''); setPage(1);
   };
 
   const toggleSaved = (job: DashboardJob) => {
@@ -253,7 +257,7 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
         <label className="filter-field"><span>Sector</span><select value={sector} onChange={(event) => { setSector(event.target.value); setPage(1); }}><option value="all">All sectors</option>{options.sectors.map((item) => <option value={item} key={item}>{label(item)}</option>)}</select></label>
         <label className="filter-field"><span>Company</span><select value={company} onChange={(event) => { setCompany(event.target.value); setPage(1); }}><option value="all">All companies</option>{options.companies.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
         <label className="filter-field"><span>Work mode</span><select value={workMode} onChange={(event) => { setWorkMode(event.target.value); setPage(1); }}><option value="all">Any work mode</option>{options.workModes.map((item) => <option value={item} key={item}>{label(item)}</option>)}</select></label>
-        <label className="filter-field"><span>State</span><select value={state} onChange={(event) => { setState(event.target.value); setPage(1); }}><option value="all">All locations</option>{options.states.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
+        <div className="filter-field"><span>States &amp; remote</span><MultiStateSelect values={selectedStates} options={[{ value: 'REMOTE', label: 'Remote / location-independent' }, ...options.states.map((item) => ({ value: item, label: item }))]} onChange={(values) => { setSelectedStates(values); setPage(1); }} allLabel="All locations" /></div>
         <label className="filter-field"><span>Discovered</span><select value={freshness} onChange={(event) => { setFreshness(event.target.value); setPage(1); }}><option value="all">Any time</option><option value="1">Past 24 hours</option><option value="3">Past 3 days</option><option value="7">Past week</option><option value="14">Past 2 weeks</option><option value="30">Past month</option></select></label>
         <button className="clear-filters" type="button" onClick={clearFilters} disabled={!filtersActive}>Reset filters</button>
       </div>

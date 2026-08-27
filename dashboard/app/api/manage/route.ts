@@ -11,6 +11,15 @@ function optional(value: unknown, maxLength = 100) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLength) : null;
 }
 
+function selectedStates(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().toUpperCase())
+    .filter((item) => item === 'REMOTE' || /^[A-Z]{2}$/.test(item)))]
+    .slice(0, 64);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as Record<string, unknown>;
@@ -37,7 +46,7 @@ export async function POST(request: NextRequest) {
         p_discipline: optional(body.discipline),
         p_sector: optional(body.sector),
         p_company: optional(body.company),
-        p_state: optional(body.state, 2),
+        p_states: selectedStates(body.states),
       });
       return NextResponse.json({ status });
     }

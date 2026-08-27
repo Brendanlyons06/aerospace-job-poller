@@ -999,9 +999,9 @@ class DatabaseDiffTests(unittest.TestCase):
             )
             connection.execute(
                 "INSERT INTO email_subscriptions (email, frequency, discipline, sector, "
-                "company, state, verification_token, unsubscribe_token, created_at, "
+                "company, state, states, verification_token, unsubscribe_token, created_at, "
                 "verification_requested_at, verification_sent_at, confirmed_at, next_digest_at) "
-                "VALUES (?, 'daily', 'mechanical', NULL, 'SpaceX', 'CA', 'verified', "
+                "VALUES (?, 'daily', 'mechanical', NULL, 'SpaceX', 'WA', 'WA,CA', 'verified', "
                 "'unsubscribe-digest', ?, ?, ?, ?, ?)",
                 (
                     "digest@example.test",
@@ -1026,6 +1026,23 @@ class DatabaseDiffTests(unittest.TestCase):
         self.assertEqual([item["title"] for item in digests[0]["jobs"]], ["Mechanical Engineering Intern"])
         db.mark_subscription_digest_complete("digest@example.test", "daily", now=now)
         self.assertEqual(db.due_subscription_digests(now=now), [])
+
+        connection = db._connect()
+        try:
+            connection.execute(
+                "UPDATE email_subscriptions SET manage_requested_at = ? WHERE email = ?",
+                (now.isoformat(), "digest@example.test"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        management = db.pending_subscription_management_emails(limit=1)
+        self.assertEqual(management, [{
+            "email": "digest@example.test",
+            "manage_token": "unsubscribe-digest",
+        }])
+        db.mark_subscription_management_sent("digest@example.test", now=now)
+        self.assertEqual(db.pending_subscription_management_emails(), [])
 
         self.assertTrue(db.public_email_send_available(now=now, daily_cap=2))
         db.record_public_email_sent(now=now)
@@ -1300,6 +1317,13 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("confirm_email_subscription_with_controls", controls_migration)
         self.assertIn("'manage_token', manage_token", controls_migration)
         self.assertNotIn("GRANT SELECT ON public.email_subscriptions", controls_migration)
+        management_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "009_passwordless_management_and_multi_state.sql"
+        ).read_text()
+        self.assertIn("request_subscription_management", management_migration)
+        self.assertIn("manage_requested_at", management_migration)
+        self.assertIn("p_states TEXT[]", management_migration)
+        self.assertNotIn("GRANT SELECT ON public.email_subscriptions", management_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
@@ -1317,6 +1341,9 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("const formElement = event.currentTarget", form)
         self.assertIn("formElement.reset()", form)
         self.assertNotIn("event.currentTarget.reset()", form)
+        self.assertIn("/api/request-management", form)
+        self.assertIn("states: selectedStates", form)
+        self.assertTrue((PROJECT_ROOT / "dashboard" / "app" / "multi-state-select.tsx").exists())
         for relative_path in (
             "subscription-form.tsx",
             "subscription-action.tsx",
@@ -1527,3 +1554,19 @@ class EmailNotificationTests(unittest.TestCase):
         body = send_email_to.call_args.args[2]
         self.assertIn("https://aeroscout.example/manage?token=manage-token", body)
         self.assertIn("https://aeroscout.example/unsubscribe?token=manage-token", body)
+
+    def test_subscription_management_email_uses_private_link(self) -> None:
+        with (
+            patch.object(notify, "AEROSCOUT_PUBLIC_URL", "https://aeroscout.example"),
+            patch.object(notify, "send_email_to") as send_email_to,
+        ):
+            notify.send_subscription_management_link(
+                "friend@example.test", "private-manage-token"
+            )
+        recipients, subject, body = send_email_to.call_args.args
+        self.assertEqual(recipients, ["friend@example.test"])
+        self.assertIn("Manage", subject)
+        self.assertIn(
+            "https://aeroscout.example/manage?token=private-manage-token", body
+        )
+        self.assertIn("Keep it private", body)
