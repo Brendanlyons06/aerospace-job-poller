@@ -1294,6 +1294,12 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("CREATE OR REPLACE FUNCTION public.delete_email_subscription", hardening_migration)
         self.assertIn("America/Los_Angeles", hardening_migration)
         self.assertNotIn("GRANT SELECT ON public.email_subscriptions", hardening_migration)
+        controls_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "008_confirmation_controls.sql"
+        ).read_text()
+        self.assertIn("confirm_email_subscription_with_controls", controls_migration)
+        self.assertIn("'manage_token', manage_token", controls_migration)
+        self.assertNotIn("GRANT SELECT ON public.email_subscriptions", controls_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
