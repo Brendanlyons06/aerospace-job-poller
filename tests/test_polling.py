@@ -1312,6 +1312,21 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("actions/checkout@v6", workflow)
         self.assertIn("actions/setup-python@v6", workflow)
 
+    def test_dashboard_subscription_and_navigation_regressions(self) -> None:
+        form = (PROJECT_ROOT / "dashboard" / "app" / "subscription-form.tsx").read_text()
+        self.assertIn("const formElement = event.currentTarget", form)
+        self.assertIn("formElement.reset()", form)
+        self.assertNotIn("event.currentTarget.reset()", form)
+        for relative_path in (
+            "subscription-form.tsx",
+            "subscription-action.tsx",
+            "manage-alerts.tsx",
+            "page.tsx",
+            "policy-shell.tsx",
+        ):
+            source = (PROJECT_ROOT / "dashboard" / "app" / relative_path).read_text()
+            self.assertNotIn("next/link", source)
+
     def test_postgres_style_queries_preserve_dedup_and_outbox_behavior(self) -> None:
         class PostgresStyleConnection:
             """Exercise the PostgreSQL parameter path against an in-memory DB."""

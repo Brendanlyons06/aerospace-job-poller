@@ -1,7 +1,6 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import Link from 'next/link';
 
 type Option = { value: string; label: string };
 type Props = {
@@ -19,9 +18,10 @@ export default function SubscriptionForm({ disciplines, sectors, companies, stat
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setStatus('sending');
     setMessage('');
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     try {
       const response = await fetch('/api/subscribe', {
         method: 'POST',
@@ -31,8 +31,8 @@ export default function SubscriptionForm({ disciplines, sectors, companies, stat
       const result = await response.json() as { accepted?: boolean; message?: string };
       if (!response.ok || !result.accepted) throw new Error(result.message || 'Unable to subscribe');
       setStatus('sent');
-      setMessage('Check your inbox within about an hour and confirm your address. No alerts are sent until you confirm.');
-      event.currentTarget.reset();
+      setMessage('Request received. If this address still needs verification, a confirmation email will arrive within about an hour. If it is already subscribed, its existing alerts remain active.');
+      formElement.reset();
     } catch (error) {
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Alerts are temporarily unavailable.');
@@ -57,7 +57,7 @@ export default function SubscriptionForm({ disciplines, sectors, companies, stat
         <label className="website-field" aria-hidden="true"><span>Website</span><input name="website" tabIndex={-1} autoComplete="off" /></label>
         <button type="submit" disabled={status === 'sending'}>{status === 'sending' ? 'Requesting…' : 'Subscribe free'}</button>
         {message && <p className={`subscribe-message ${status}`} role="status">{message}</p>}
-        <p className="subscribe-terms">Unsubscribe or manage preferences from any digest. By subscribing, you agree to the <Link href="/terms">Terms</Link> and acknowledge the <Link href="/privacy">Privacy policy</Link>.</p>
+        <p className="subscribe-terms">Unsubscribe or manage preferences from any digest. By subscribing, you agree to the <a href="/terms">Terms</a> and acknowledge the <a href="/privacy">Privacy policy</a>.</p>
       </form>
     </section>
   );

@@ -1,6 +1,7 @@
 'use client';
 
-import Link from 'next/link';
+/* eslint-disable @next/next/no-html-link-for-pages -- native navigation avoids the hosted router interception bug */
+
 import { FormEvent, useEffect, useState } from 'react';
 
 type Option = { value: string; label: string };
@@ -81,12 +82,12 @@ export default function ManageAlerts({ token, disciplines, sectors, companies, s
   }
 
   if (status === 'loading') return <div className="action-card"><h1>Manage alerts</h1><p>Loading your private alert settings…</p></div>;
-  if (status === 'deleted') return <div className="action-card"><h1>Data deleted</h1><p>{message}</p><Link href="/">Return to AeroScout</Link></div>;
+  if (status === 'deleted') return <div className="action-card"><h1>Data deleted</h1><p>{message}</p><a href="/">Return to AeroScout</a></div>;
   if (status === 'error' && message.startsWith('This manage-alerts link')) {
-    return <div className="action-card"><h1>Manage alerts</h1><p className="action-error">{message}</p><Link href="/">Return to AeroScout</Link></div>;
+    return <div className="action-card"><h1>Manage alerts</h1><p className="action-error">{message}</p><a href="/">Return to AeroScout</a></div>;
   }
   if (subscriptionStatus === 'unsubscribed') {
-    return <div className="action-card manage-card"><p className="eyebrow dark">Private subscription settings</p><h1>Alerts are unsubscribed</h1><p>No more digests will be delivered. You can keep this inactive record or permanently remove the email address and its alert settings.</p><div className="danger-zone"><strong>Delete my alert data</strong><p>This action cannot be undone.</p><button type="button" onClick={deleteData} disabled={status === 'deleting'}>{status === 'deleting' ? 'Deleting…' : 'Delete permanently'}</button></div>{message && <p className="manage-message error" role="status">{message}</p>}<Link href="/">Return to AeroScout</Link></div>;
+    return <div className="action-card manage-card"><p className="eyebrow dark">Private subscription settings</p><h1>Alerts are unsubscribed</h1><p>No more digests will be delivered. You can keep this inactive record or permanently remove the email address and its alert settings.</p><div className="danger-zone"><strong>Delete my alert data</strong><p>This action cannot be undone.</p><button type="button" onClick={deleteData} disabled={status === 'deleting'}>{status === 'deleting' ? 'Deleting…' : 'Delete permanently'}</button></div>{message && <p className="manage-message error" role="status">{message}</p>}<a href="/">Return to AeroScout</a></div>;
   }
 
   const optionWithCurrent = (items: Option[], current: string) => current && !items.some((item) => item.value === current)
@@ -108,7 +109,7 @@ export default function ManageAlerts({ token, disciplines, sectors, companies, s
       </form>
       {message && <p className={`manage-message ${status === 'saved' ? 'success' : 'error'}`} role="status">{message}</p>}
       <div className="danger-zone"><strong>Delete my alert data</strong><p>This permanently removes the email address and all subscription settings connected to this private link.</p><button type="button" onClick={deleteData} disabled={status === 'deleting'}>{status === 'deleting' ? 'Deleting…' : 'Delete permanently'}</button></div>
-      <Link href="/">Return to AeroScout</Link>
+      <a href="/">Return to AeroScout</a>
     </div>
   );
 }
