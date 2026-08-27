@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,8 @@ from .job_metadata import company_sector, enrich_job
 
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(PROJECT_DIR / ".env")
+
+PACIFIC_TIME = ZoneInfo("America/Los_Angeles")
 
 DB_PATH = Path(
     os.environ.get("JOB_POLLER_DB_PATH") or PROJECT_DIR / "jobs.db"
@@ -747,6 +750,21 @@ def pending_subscription_verifications(*, limit: int = 10) -> list[dict]:
     ]
 
 
+def cleanup_expired_subscription_requests(*, now: datetime | None = None) -> int:
+    """Delete unconfirmed requests once their seven-day link is long expired."""
+    now = now or datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=30)).isoformat()
+    with _connection() as conn:
+        cursor = _execute(
+            conn,
+            "DELETE FROM email_subscriptions WHERE confirmed_at IS NULL "
+            "AND created_at < ?",
+            (cutoff,),
+        )
+        conn.commit()
+        return max(0, cursor.rowcount)
+
+
 def mark_subscription_verification_sent(
     email: str, *, now: datetime | None = None
 ) -> None:
@@ -798,6 +816,34 @@ def record_public_email_sent(*, now: datetime | None = None) -> None:
             (key,),
         )
         conn.commit()
+
+
+def subscription_summary(*, now: datetime | None = None) -> dict[str, int]:
+    """Return private aggregate subscription metrics for the owner report."""
+    now = now or datetime.now(timezone.utc)
+    daily_key = f"public_email_sent_{now.date().isoformat()}"
+    with _connection() as conn:
+        row = _execute(
+            conn,
+            "SELECT "
+            "SUM(CASE WHEN confirmed_at IS NOT NULL AND unsubscribed_at IS NULL THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN confirmed_at IS NULL AND unsubscribed_at IS NULL THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN unsubscribed_at IS NOT NULL THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN consecutive_failures > 0 THEN 1 ELSE 0 END) "
+            "FROM email_subscriptions",
+        ).fetchone()
+        sent_row = _execute(
+            conn, "SELECT value FROM system_meta WHERE key = ?", (daily_key,)
+        ).fetchone()
+    return {
+        "active": int(row[0] or 0),
+        "pending": int(row[1] or 0),
+        "unsubscribed": int(row[2] or 0),
+        "delivery_failures": int(row[3] or 0),
+        "emails_sent_today": int(sent_row[0]) if sent_row else 0,
+        "subscriber_cap": 100,
+        "daily_email_cap": 200,
+    }
 
 
 def due_subscription_digests(
@@ -864,18 +910,30 @@ def due_subscription_digests(
         return digests
 
 
+def _next_digest_time(frequency: str, now: datetime) -> datetime:
+    """Return the next 9:00 AM Pacific digest boundary in UTC."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local_now = now.astimezone(PACIFIC_TIME)
+    days_ahead = (7 - local_now.weekday()) if frequency == "weekly" else 1
+    local_next = (local_now + timedelta(days=days_ahead)).replace(
+        hour=9, minute=0, second=0, microsecond=0
+    )
+    return local_next.astimezone(timezone.utc)
+
+
 def mark_subscription_digest_complete(
     email: str, frequency: str, *, now: datetime | None = None
 ) -> None:
     """Advance a digest whether or not it contained new matching jobs."""
     now = now or datetime.now(timezone.utc)
-    interval = timedelta(days=7 if frequency == "weekly" else 1)
+    next_digest = _next_digest_time(frequency, now)
     with _connection() as conn:
         _execute(
             conn,
             "UPDATE email_subscriptions SET last_digest_at = ?, next_digest_at = ?, "
             "consecutive_failures = 0, last_error = NULL WHERE email = ? "
             "AND unsubscribed_at IS NULL",
-            (now.isoformat(), (now + interval).isoformat(), email),
+            (now.isoformat(), next_digest.isoformat(), email),
         )
         conn.commit()

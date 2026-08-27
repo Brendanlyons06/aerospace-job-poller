@@ -72,6 +72,9 @@ inaccessible.
 - [x] Self-service verified email addresses without paid authentication
 - [x] Filter-matched daily and weekly digests
 - [x] Unsubscribe controls, bounded delivery, and a 100-subscriber free cap
+- [x] Self-service alert preferences and permanent subscription-data deletion
+- [x] Predictable 9:15 AM Pacific daily and Monday weekly delivery windows
+- [x] Privacy, Terms, Contact, and private aggregate owner reporting
 - [x] Device-local saved jobs
 - [ ] Cross-device accounts and saved searches
 - [ ] Immediate per-job alerts after a transactional email provider is added
@@ -82,8 +85,10 @@ inaccessible.
 - Delivery caps and compliant provider integration
 - SMS remains disabled until its unavoidable provider costs are approved
 
-## Phase 7 — production hardening
+## Phase 7 — production hardening — public beta foundation implemented
 
-- Adapter monitoring, backups, administration tools, and security review
-- Privacy and usage policies
+- [x] Adapter monitoring and private aggregate subscriber reporting
+- [x] Privacy and usage policies
+- [ ] Automated backups and authenticated administration tools
+- [ ] Independent security review before broader promotion
 - Public beta and paid-infrastructure decision based on measured demand

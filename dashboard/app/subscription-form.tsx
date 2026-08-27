@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import Link from 'next/link';
 
 type Option = { value: string; label: string };
 type Props = {
@@ -43,7 +44,7 @@ export default function SubscriptionForm({ disciplines, sectors, companies, stat
       <div className="subscribe-intro">
         <p className="eyebrow dark">Free email alerts</p>
         <h3 id="subscribe-heading">Let new internships come to you.</h3>
-        <p>Choose a daily or weekly digest. Filters are optional, and every address must be verified.</p>
+        <p>Choose a daily or weekly digest delivered around 9:15 AM Pacific. Filters are optional, and every address must be verified.</p>
         <small>{subscriberCount} of {subscriberCap} free beta subscriptions active</small>
       </div>
       <form className="subscribe-form" onSubmit={submit}>
@@ -56,7 +57,7 @@ export default function SubscriptionForm({ disciplines, sectors, companies, stat
         <label className="website-field" aria-hidden="true"><span>Website</span><input name="website" tabIndex={-1} autoComplete="off" /></label>
         <button type="submit" disabled={status === 'sending'}>{status === 'sending' ? 'Requesting…' : 'Subscribe free'}</button>
         {message && <p className={`subscribe-message ${status}`} role="status">{message}</p>}
-        <p className="subscribe-terms">Unsubscribe from any digest. AeroScout never exposes subscriber addresses.</p>
+        <p className="subscribe-terms">Unsubscribe or manage preferences from any digest. By subscribing, you agree to the <Link href="/terms">Terms</Link> and acknowledge the <Link href="/privacy">Privacy policy</Link>.</p>
       </form>
     </section>
   );

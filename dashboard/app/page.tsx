@@ -1,5 +1,6 @@
 import JobsTable from './jobs-table';
 import { getDashboardJobs } from '../lib/jobs';
+import Link from 'next/link';
 
 function refreshedLabel(value: string | null) {
   if (!value) return 'Refresh time unavailable';
@@ -38,7 +39,7 @@ export default async function Home() {
         </div>
       </section>
       <section className="shell finder"><JobsTable jobs={result.jobs} sources={result.sources} notice={result.notice} isLive={result.source === 'live'} sourceCount={result.sourceCount} healthySourceCount={result.healthySourceCount} warningSourceCount={result.warningSourceCount} lastRefreshedAt={result.lastRefreshedAt} subscriberCount={result.subscriberCount} subscriberCap={result.subscriberCap} /></section>
-      <footer className="shell"><span>AeroScout</span><span>Engineering &amp; STEM internship search.</span></footer>
+      <footer className="shell"><span>AeroScout</span><nav><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link><Link href="/contact">Contact</Link><a href="https://github.com/Brendanlyons06/aerospace-job-poller" target="_blank" rel="noreferrer">GitHub ↗</a></nav></footer>
     </main>
   );
 }

@@ -86,6 +86,11 @@ def validate_configuration() -> tuple[str, ...]:
                 "Twilio settings missing: " + ", ".join(missing)
             )
 
+    if PUBLIC_SUBSCRIPTIONS_ENABLED and not AEROSCOUT_PUBLIC_URL:
+        errors.append(
+            "AEROSCOUT_PUBLIC_URL is required when public subscriptions are enabled"
+        )
+
     if not enabled:
         errors.append(
             "No alert channel is enabled; set EMAIL_ALERTS_ENABLED=true "
@@ -140,7 +145,8 @@ def send_subscription_verification(email: str, token: str) -> None:
         "Confirm your AeroScout internship alerts",
         "Confirm your AeroScout email alerts by opening this link:\n\n"
         f"{verification_url}\n\n"
-        "The link expires in 7 days. If you did not request this, ignore this email.",
+        "The link expires in 7 days. Digests arrive at about 9:15 AM Pacific "
+        "on your selected schedule. If you did not request this, ignore this email.",
     )
 
 
@@ -149,6 +155,10 @@ def send_subscription_digest(email: str, jobs: list[dict], unsubscribe_token: st
         raise RuntimeError("AEROSCOUT_PUBLIC_URL is required for public subscriptions")
     unsubscribe_url = (
         f"{AEROSCOUT_PUBLIC_URL}/unsubscribe?"
+        f"{urlencode({'token': unsubscribe_token})}"
+    )
+    manage_url = (
+        f"{AEROSCOUT_PUBLIC_URL}/manage?"
         f"{urlencode({'token': unsubscribe_token})}"
     )
     lines = [f"{len(jobs)} new matching AeroScout role{'s' if len(jobs) != 1 else ''}", ""]
@@ -165,6 +175,7 @@ def send_subscription_digest(email: str, jobs: list[dict], unsubscribe_token: st
         [
             f"Browse all current roles: {AEROSCOUT_PUBLIC_URL}",
             "",
+            f"Manage alert preferences: {manage_url}",
             f"Unsubscribe: {unsubscribe_url}",
         ]
     )

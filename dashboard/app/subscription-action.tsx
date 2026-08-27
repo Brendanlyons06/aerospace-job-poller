@@ -22,6 +22,7 @@ export default function SubscriptionAction({ mode, token }: { mode: 'verify' | '
   return (
     <div className="action-card">
       {status === 'done' ? <><h1>{mode === 'verify' ? 'Alerts confirmed' : 'You are unsubscribed'}</h1><p>{mode === 'verify' ? 'Your first digest will arrive on the schedule you selected.' : 'No more AeroScout digests will be sent to this address.'}</p></> : <><h1>{label}</h1><p>{mode === 'verify' ? 'Confirm that you want AeroScout internship digests.' : 'Stop future AeroScout internship digests for this address.'}</p><button type="button" onClick={act} disabled={status === 'working' || !token}>{status === 'working' ? 'Working…' : label}</button>{status === 'error' && <p className="action-error" role="alert">This link is invalid, expired, or temporarily unavailable.</p>}</>}
+      {mode === 'unsubscribe' && status !== 'done' && token && <Link href={`/manage?token=${encodeURIComponent(token)}`}>Manage preferences instead</Link>}
       <Link href="/">Return to AeroScout</Link>
     </div>
   );

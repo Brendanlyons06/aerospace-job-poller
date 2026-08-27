@@ -207,10 +207,11 @@ notification history, and poller-control data remain inaccessible.
 The dashboard also includes device-local saved jobs, browser-location radius
 filtering for postings whose source supplies coordinates, and a public email
 subscription form. Subscribers select optional discipline, sector, company,
-and state filters, confirm their email through a seven-day link, and can
-unsubscribe from every digest. Subscriber addresses, delivery errors, and
-tokens are protected by row-level security and are never exposed through the
-dashboard API.
+and state filters, confirm their email through a seven-day link, and receive
+daily digests or Monday weekly digests at about 9:15 AM Pacific. Every digest
+has private links to change filters, unsubscribe, or permanently delete the
+subscription. Subscriber addresses, delivery errors, and tokens are protected
+by row-level security and are never exposed through the dashboard API.
 
 The initial public beta has a hard database cap of 100 confirmed subscribers.
 Confirmation requests are limited to 20 per hour, verification emails to 10
@@ -220,6 +221,11 @@ sender well below its consumer-account ceiling and prevent one burst of
 signups from consuming the free allowance. Gmail is appropriate for this
 small private beta, but a transactional sender should replace it before the
 service is marketed broadly.
+
+The existing weekly owner health email includes aggregate subscription counts,
+pending confirmations, delivery failures, and daily public-email usage. It
+never includes subscriber addresses or management tokens. Public Privacy,
+Terms, and Contact pages document the beta’s behavior and limitations.
 
 Copy `dashboard/.env.example` to `dashboard/.env.local` and fill in:
 

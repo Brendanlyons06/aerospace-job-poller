@@ -43,7 +43,7 @@ def _send_health_message(subject: str, body: str) -> bool:
 
 def _weekly_health_body() -> str:
     rows = db.health_snapshot()
-    lines = ["Weekly aerospace job-poller status", ""]
+    lines = ["Weekly AeroScout poller status", ""]
     for row in rows:
         if row["consecutive_failures"]:
             status = f"FAILING ({row['consecutive_failures']} consecutive polls)"
@@ -52,6 +52,19 @@ def _weekly_health_body() -> str:
         if row["consecutive_zero"]:
             status += f", zero-match streak {row['consecutive_zero']}"
         lines.append(f"{row['company']}: {status}")
+    subscriptions = db.subscription_summary()
+    lines.extend(
+        [
+            "",
+            "Subscriber beta",
+            f"Active: {subscriptions['active']} / {subscriptions['subscriber_cap']}",
+            f"Pending verification: {subscriptions['pending']}",
+            f"Unsubscribed records: {subscriptions['unsubscribed']}",
+            f"Addresses with delivery failures: {subscriptions['delivery_failures']}",
+            "Public emails sent today: "
+            f"{subscriptions['emails_sent_today']} / {subscriptions['daily_email_cap']}",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -59,6 +72,9 @@ def _process_public_subscriptions() -> None:
     """Send bounded confirmation and digest batches using the existing SMTP account."""
     if not notify.PUBLIC_SUBSCRIPTIONS_ENABLED:
         return
+    removed = db.cleanup_expired_subscription_requests()
+    if removed:
+        print(f"removed {removed} expired unconfirmed subscription request(s)")
     for subscription in db.pending_subscription_verifications(limit=10):
         if not db.public_email_send_available():
             print("PUBLIC EMAIL DAILY CAP REACHED; remaining deliveries deferred")
@@ -207,7 +223,7 @@ def _run_once() -> None:
 
     if db.weekly_summary_due():
         if _send_health_message(
-            "Weekly aerospace job-poller status", _weekly_health_body()
+            "Weekly AeroScout poller and subscriber status", _weekly_health_body()
         ):
             db.mark_weekly_summary_sent()
 

@@ -1033,6 +1033,58 @@ class DatabaseDiffTests(unittest.TestCase):
         db.record_public_email_sent(now=now)
         self.assertFalse(db.public_email_send_available(now=now, daily_cap=2))
 
+        summary = db.subscription_summary(now=now)
+        self.assertEqual(summary["active"], 1)
+        self.assertEqual(summary["pending"], 1)
+        self.assertEqual(summary["emails_sent_today"], 2)
+        self.assertEqual(summary["subscriber_cap"], 100)
+        self.assertEqual(summary["daily_email_cap"], 200)
+
+    def test_digest_schedule_is_fixed_to_pacific_mornings_across_dst(self) -> None:
+        summer = datetime(2026, 8, 26, 17, tzinfo=timezone.utc)
+        winter = datetime(2026, 1, 7, 18, tzinfo=timezone.utc)
+        self.assertEqual(
+            db._next_digest_time("daily", summer),
+            datetime(2026, 8, 27, 16, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            db._next_digest_time("weekly", summer),
+            datetime(2026, 8, 31, 16, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            db._next_digest_time("daily", winter),
+            datetime(2026, 1, 8, 17, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            db._next_digest_time("weekly", winter),
+            datetime(2026, 1, 12, 17, tzinfo=timezone.utc),
+        )
+
+    def test_expired_unconfirmed_subscription_requests_are_deleted(self) -> None:
+        now = datetime(2026, 8, 26, tzinfo=timezone.utc)
+        connection = db._connect()
+        try:
+            for email, created in (
+                ("old@example.test", now - timedelta(days=31)),
+                ("new@example.test", now - timedelta(days=2)),
+            ):
+                connection.execute(
+                    "INSERT INTO email_subscriptions (email, frequency, verification_token, "
+                    "unsubscribe_token, created_at, verification_requested_at) "
+                    "VALUES (?, 'daily', ?, ?, ?, ?)",
+                    (email, f"verify-{email}", f"unsubscribe-{email}", created.isoformat(), created.isoformat()),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(db.cleanup_expired_subscription_requests(now=now), 1)
+        connection = db._connect()
+        try:
+            emails = [row[0] for row in connection.execute("SELECT email FROM email_subscriptions").fetchall()]
+        finally:
+            connection.close()
+        self.assertEqual(emails, ["new@example.test"])
+
     def test_dashboard_rows_and_two_poll_closure_lifecycle(self) -> None:
         posting = job("phase-2", "Mechanical Design Engineering Intern") | {
             "locations": ["Long Beach, CA"],
@@ -1234,6 +1286,14 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("confirmed_at IS NOT NULL AND unsubscribed_at IS NULL", subscription_migration)
         self.assertIn("100 AS subscriber_cap", subscription_migration)
         self.assertNotIn("GRANT SELECT ON public.email_subscriptions", subscription_migration)
+        hardening_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "007_public_beta_hardening.sql"
+        ).read_text()
+        self.assertIn("CREATE OR REPLACE FUNCTION public.get_email_subscription", hardening_migration)
+        self.assertIn("CREATE OR REPLACE FUNCTION public.update_email_subscription", hardening_migration)
+        self.assertIn("CREATE OR REPLACE FUNCTION public.delete_email_subscription", hardening_migration)
+        self.assertIn("America/Los_Angeles", hardening_migration)
+        self.assertNotIn("GRANT SELECT ON public.email_subscriptions", hardening_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
@@ -1279,6 +1339,20 @@ class DatabaseConfigurationTests(unittest.TestCase):
         connection.inner.close()
 
 class PollerTests(unittest.TestCase):
+    def test_weekly_health_report_includes_private_subscription_aggregates(self) -> None:
+        with (
+            patch.object(watch.db, "health_snapshot", return_value=[]),
+            patch.object(watch.db, "subscription_summary", return_value={
+                "active": 3, "pending": 2, "unsubscribed": 1,
+                "delivery_failures": 0, "emails_sent_today": 7,
+                "subscriber_cap": 100, "daily_email_cap": 200,
+            }),
+        ):
+            body = watch._weekly_health_body()
+        self.assertIn("Subscriber beta", body)
+        self.assertIn("Active: 3 / 100", body)
+        self.assertIn("Public emails sent today: 7 / 200", body)
+
     def test_fetch_applies_company_filter(self) -> None:
         company = SimpleNamespace(
             COMPANY_NAME="Example",
@@ -1414,3 +1488,18 @@ class EmailNotificationTests(unittest.TestCase):
         self.assertEqual(recipients, ["friend@example.test"])
         self.assertIn("Confirm", subject)
         self.assertIn("https://aeroscout.example/verify?token=token-123", body)
+        self.assertIn("9:15 AM Pacific", body)
+
+    def test_subscription_digest_includes_manage_and_unsubscribe_links(self) -> None:
+        with (
+            patch.object(notify, "AEROSCOUT_PUBLIC_URL", "https://aeroscout.example"),
+            patch.object(notify, "send_email_to") as send_email_to,
+        ):
+            notify.send_subscription_digest(
+                "friend@example.test",
+                [{"company": "SpaceX", "title": "Mechanical Intern", "locations": "Hawthorne, CA", "url": "https://example.test/job"}],
+                "manage-token",
+            )
+        body = send_email_to.call_args.args[2]
+        self.assertIn("https://aeroscout.example/manage?token=manage-token", body)
+        self.assertIn("https://aeroscout.example/unsubscribe?token=manage-token", body)
