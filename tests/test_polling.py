@@ -1081,6 +1081,20 @@ class DatabaseDiffTests(unittest.TestCase):
         self.assertIn('cron: "47 17 * * *"', workflow)
         self.assertIn("python -m job-poller.send_due_digests", workflow)
 
+    def test_postgres_digest_casts_legacy_first_seen_timestamp(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        try:
+            self.assertEqual(
+                db._digest_first_seen_after_clause(connection),
+                "j.first_seen > ?",
+            )
+        finally:
+            connection.close()
+        self.assertEqual(
+            db._digest_first_seen_after_clause(object()),
+            "j.first_seen::timestamptz > ?",
+        )
+
     def test_digest_schedule_is_fixed_to_pacific_mornings_across_dst(self) -> None:
         summer = datetime(2026, 8, 26, 17, tzinfo=timezone.utc)
         winter = datetime(2026, 1, 7, 18, tzinfo=timezone.utc)

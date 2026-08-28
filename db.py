@@ -898,6 +898,13 @@ def subscription_summary(*, now: datetime | None = None) -> dict[str, int]:
     }
 
 
+def _digest_first_seen_after_clause(conn) -> str:
+    """Return the backend-safe comparison for the legacy first_seen column."""
+    if isinstance(conn, sqlite3.Connection):
+        return "j.first_seen > ?"
+    return "j.first_seen::timestamptz > ?"
+
+
 def due_subscription_digests(
     *, now: datetime | None = None, limit: int = 20
 ) -> list[dict]:
@@ -917,7 +924,12 @@ def due_subscription_digests(
         digests = []
         for subscription in subscriptions:
             email, frequency, discipline, sector, company, state, states, token, cutoff = subscription
-            conditions = ["j.closed_at IS NULL", "j.first_seen > ?"]
+            # ``jobs.first_seen`` predates the typed subscription schema and
+            # is TEXT in PostgreSQL, while confirmed_at/last_digest_at are
+            # TIMESTAMPTZ. PostgreSQL will not compare those types implicitly.
+            # SQLite stores both as ISO text, so retain its native comparison.
+            first_seen = _digest_first_seen_after_clause(conn)
+            conditions = ["j.closed_at IS NULL", first_seen]
             parameters: list[object] = [cutoff]
             if discipline:
                 conditions.append("j.discipline = ?")
