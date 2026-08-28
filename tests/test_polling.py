@@ -52,6 +52,7 @@ notify = importlib.import_module(f"{PACKAGE}.notify")
 profiles = importlib.import_module(f"{PACKAGE}.profiles")
 rippling = importlib.import_module(f"{PACKAGE}.companies.rippling")
 rippling_client = importlib.import_module(f"{PACKAGE}.companies.rippling.client")
+send_due_digests = importlib.import_module(f"{PACKAGE}.send_due_digests")
 watch = importlib.import_module(f"{PACKAGE}.watch")
 
 
@@ -1056,6 +1057,29 @@ class DatabaseDiffTests(unittest.TestCase):
         self.assertEqual(summary["emails_sent_today"], 2)
         self.assertEqual(summary["subscriber_cap"], 100)
         self.assertEqual(summary["daily_email_cap"], 200)
+
+    def test_standalone_digest_runner_processes_subscriptions(self) -> None:
+        with (
+            patch.object(send_due_digests.db, "validate_configuration", return_value="postgres"),
+            patch.object(send_due_digests.notify, "validate_configuration") as validate_notify,
+            patch.object(send_due_digests, "_process_public_subscriptions") as process,
+            patch("builtins.print") as print_message,
+        ):
+            send_due_digests.run()
+
+        validate_notify.assert_called_once_with()
+        process.assert_called_once_with()
+        print_message.assert_called_once_with("database backend: postgres")
+
+    def test_daily_digest_workflow_has_redundant_pacific_windows(self) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "daily-digest.yml"
+        ).read_text()
+        self.assertIn('cron: "17 16 * * *"', workflow)
+        self.assertIn('cron: "47 16 * * *"', workflow)
+        self.assertIn('cron: "17 17 * * *"', workflow)
+        self.assertIn('cron: "47 17 * * *"', workflow)
+        self.assertIn("python -m job-poller.send_due_digests", workflow)
 
     def test_digest_schedule_is_fixed_to_pacific_mornings_across_dst(self) -> None:
         summer = datetime(2026, 8, 26, 17, tzinfo=timezone.utc)

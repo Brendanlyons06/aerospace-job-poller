@@ -127,6 +127,12 @@ def _process_public_subscriptions() -> None:
         else:
             if digest["jobs"]:
                 db.record_public_email_sent()
+                print(
+                    "SUBSCRIPTION DIGEST SENT: "
+                    f"{len(digest['jobs'])} matching job(s)"
+                )
+            else:
+                print("SUBSCRIPTION DIGEST COMPLETE: no new matching jobs")
             db.mark_subscription_digest_complete(digest["email"], digest["frequency"])
 
 
