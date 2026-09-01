@@ -35,12 +35,16 @@ export default async function OwnerPage() {
   const visitorId = requestHeaders.get('oai-authenticated-user-id');
   const visitorEmail = requestHeaders.get('oai-authenticated-user-email');
   const ownerId = process.env.AEROSCOUT_OWNER_USER_ID;
+  const ownerEmail = process.env.AEROSCOUT_OWNER_EMAIL?.trim().toLowerCase();
+  const normalizedVisitorEmail = visitorEmail?.trim().toLowerCase();
 
   if (!visitorId) {
     return <MessageCard title="Owner sign-in required"><p>Sign in with ChatGPT to open AeroScout’s private operating status.</p><a className="owner-primary" href="/signin-with-chatgpt?return_to=%2Fowner" target="_top">Sign in with ChatGPT</a></MessageCard>;
   }
-  if (!ownerId || visitorId !== ownerId) {
-    return <MessageCard title="Owner access only"><p>This signed-in account is not authorized to view AeroScout’s operating controls.</p><a className="owner-secondary" href="/">Return to AeroScout</a></MessageCard>;
+  const isOwner = (Boolean(ownerId) && visitorId === ownerId)
+    || (Boolean(ownerEmail) && normalizedVisitorEmail === ownerEmail);
+  if (!isOwner) {
+    return <MessageCard title="Owner access only"><p>{visitorEmail ? `The signed-in account (${visitorEmail}) is not authorized to view AeroScout’s operating controls.` : 'This signed-in account is not authorized to view AeroScout’s operating controls.'}</p><a className="owner-secondary" href="/signout-with-chatgpt?return_to=%2Fowner" target="_top">Use a different ChatGPT account</a></MessageCard>;
   }
 
   const status = await getOwnerStatus();

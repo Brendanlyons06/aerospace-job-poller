@@ -1423,7 +1423,9 @@ class DatabaseConfigurationTests(unittest.TestCase):
             PROJECT_ROOT / "dashboard" / "lib" / "owner.ts"
         ).read_text()
         self.assertIn("oai-authenticated-user-id", owner_page)
+        self.assertIn("oai-authenticated-user-email", owner_page)
         self.assertIn("AEROSCOUT_OWNER_USER_ID", owner_page)
+        self.assertIn("AEROSCOUT_OWNER_EMAIL", owner_page)
         self.assertIn("/signin-with-chatgpt?return_to=%2Fowner", owner_page)
         self.assertIn("hourly-poller.yml", owner_page)
         self.assertIn("daily-digest.yml", owner_page)
