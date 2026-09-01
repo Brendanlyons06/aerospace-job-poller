@@ -745,6 +745,48 @@ def mark_poll_completed(*, now: datetime | None = None) -> None:
         conn.commit()
 
 
+def last_poll_completed_at() -> datetime | None:
+    """Return the most recent completed poll as a timezone-aware timestamp."""
+    with _connection() as conn:
+        row = _execute(
+            conn,
+            "SELECT value FROM system_meta WHERE key = 'last_poll_completed_at'",
+        ).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        completed = datetime.fromisoformat(row[0])
+    except (TypeError, ValueError):
+        return None
+    if completed.tzinfo is None:
+        completed = completed.replace(tzinfo=timezone.utc)
+    return completed.astimezone(timezone.utc)
+
+
+def poll_is_stale(
+    *, max_age: timedelta = timedelta(hours=2), now: datetime | None = None
+) -> bool:
+    """Return true when no completed poll exists within ``max_age``."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    completed = last_poll_completed_at()
+    return completed is None or now.astimezone(timezone.utc) - completed > max_age
+
+
+def mark_digest_run_completed(*, now: datetime | None = None) -> None:
+    """Record that the independent digest worker completed successfully."""
+    now = now or datetime.now(timezone.utc)
+    with _connection() as conn:
+        _execute(
+            conn,
+            "INSERT INTO system_meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("last_digest_completed_at", now.isoformat()),
+        )
+        conn.commit()
+
+
 def pending_subscription_verifications(*, limit: int = 10) -> list[dict]:
     """Return pending confirmations that have not yet received an email."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()

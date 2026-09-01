@@ -89,13 +89,25 @@ export type JobsResult = {
   warningSourceCount: number;
   subscriberCount: number;
   subscriberCap: number;
+  pollStatus: 'healthy' | 'delayed' | 'stale' | 'unknown';
+  pollAgeMinutes: number | null;
 };
+
+export function pollFreshness(value: string | null, now = Date.now()) {
+  if (!value) return { status: 'unknown' as const, ageMinutes: null };
+  const refreshedAt = new Date(value).getTime();
+  if (!Number.isFinite(refreshedAt)) return { status: 'unknown' as const, ageMinutes: null };
+  const ageMinutes = Math.max(0, Math.floor((now - refreshedAt) / 60_000));
+  if (ageMinutes <= 120) return { status: 'healthy' as const, ageMinutes };
+  if (ageMinutes <= 360) return { status: 'delayed' as const, ageMinutes };
+  return { status: 'stale' as const, ageMinutes };
+}
 
 export async function getDashboardJobs(): Promise<JobsResult> {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
   const key = process.env.SUPABASE_ANON_KEY;
   if (!url || !key) {
-    return { jobs: demoJobs, sources: demoSources, source: 'demo', notice: 'Preview data — add the two Supabase dashboard settings to display your live job feed.', lastRefreshedAt: null, sourceCount: 50, activeJobCount: demoJobs.length, healthySourceCount: 50, warningSourceCount: 0, subscriberCount: 0, subscriberCap: 100 };
+    return { jobs: demoJobs, sources: demoSources, source: 'demo', notice: 'Preview data — add the two Supabase dashboard settings to display your live job feed.', lastRefreshedAt: null, sourceCount: 50, activeJobCount: demoJobs.length, healthySourceCount: 50, warningSourceCount: 0, subscriberCount: 0, subscriberCap: 100, pollStatus: 'unknown', pollAgeMinutes: null };
   }
 
   try {
@@ -110,6 +122,7 @@ export async function getDashboardJobs(): Promise<JobsResult> {
     const statusRows = statusResponse.ok ? (await statusResponse.json()) as SupabaseStatus[] : [];
     const sourceRows = sourcesResponse.ok ? (await sourcesResponse.json()) as SupabaseSource[] : [];
     const status = statusRows[0];
+    const freshness = pollFreshness(status?.refreshed_at || null);
     return {
       source: 'live',
       notice: 'Live data from the hourly job poller.',
@@ -120,6 +133,8 @@ export async function getDashboardJobs(): Promise<JobsResult> {
       warningSourceCount: Number(status?.warning_source_count) || sourceRows.filter((item) => item.status === 'degraded' || item.status === 'failing').length,
       subscriberCount: Number(status?.subscriber_count) || 0,
       subscriberCap: Number(status?.subscriber_cap) || 100,
+      pollStatus: freshness.status,
+      pollAgeMinutes: freshness.ageMinutes,
       sources: sourceRows.map((row) => ({
         company: row.company,
         sector: row.sector,
@@ -152,6 +167,6 @@ export async function getDashboardJobs(): Promise<JobsResult> {
       }),
     };
   } catch {
-    return { jobs: demoJobs, sources: demoSources, source: 'demo', notice: 'The live feed could not be reached, so preview data is shown.', lastRefreshedAt: null, sourceCount: 50, activeJobCount: demoJobs.length, healthySourceCount: 50, warningSourceCount: 0, subscriberCount: 0, subscriberCap: 100 };
+    return { jobs: demoJobs, sources: demoSources, source: 'demo', notice: 'The live feed could not be reached, so preview data is shown.', lastRefreshedAt: null, sourceCount: 50, activeJobCount: demoJobs.length, healthySourceCount: 50, warningSourceCount: 0, subscriberCount: 0, subscriberCap: 100, pollStatus: 'unknown', pollAgeMinutes: null };
   }
 }

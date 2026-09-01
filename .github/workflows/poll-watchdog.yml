@@ -1,0 +1,73 @@
+name: AeroScout Poll Recovery Watchdog
+
+on:
+  schedule:
+    # A second, staggered schedule checks whether the primary hourly poll fell behind.
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - poll_if_stale.py
+      - db.py
+      - supabase/migrations/**
+      - .github/workflows/poll-watchdog.yml
+
+concurrency:
+  group: aerospace-job-poller
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  recover-if-stale:
+    if: github.event_name != 'schedule' || vars.POLLER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JOB_POLLER_PROFILE: aerospace
+      JOB_POLLER_COMPANIES: spacex,blueorigin,northropgrumman,geaerospace,rocketlab,relativityspace,fireflyaerospace,impulsespace,trueanomaly,apexspace,vastspace,aerovironment,jobyaviation,betatechnologies,rtx,baesystems,leidos,anduril,shieldai,stokespace,varda,k2space,aerospacecorp,zipline,astranis,epirus,caci,machindustries,skydio,hadrian,saronic,planetlabs,archeraviation,muonspace,machinalabs,gravitics,northwoodspace,axiomspace,loftorbital,wiskaero,boomsupersonic,sierranevada,moog,curtisswright,appliedmaterials,ispace,apple,caterpillar,astrolab,starpath
+      JOB_POLLER_STALE_AFTER_MINUTES: "120"
+      JOB_POLLER_REQUIRE_POSTGRES: "true"
+      JOB_POLLER_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+      EMAIL_ALERTS_ENABLED: "true"
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      SMS_ALERTS_ENABLED: "false"
+      PUBLIC_SUBSCRIPTIONS_ENABLED: "true"
+      AEROSCOUT_PUBLIC_URL: https://aeroscout-internships.brendanlyons07.chatgpt.site
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          path: job-poller
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: job-poller/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r job-poller/requirements.txt
+
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          if [ -z "$JOB_POLLER_DATABASE_URL" ]; then
+            echo "Missing SUPABASE_DATABASE_URL"
+            exit 1
+          fi
+          if [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ] || [ -z "$EMAIL_TO" ]; then
+            echo "Missing one or more email secrets: SMTP_USER, SMTP_PASSWORD, EMAIL_TO"
+            exit 1
+          fi
+
+      - name: Recover a stale poll
+        run: python -m job-poller.poll_if_stale

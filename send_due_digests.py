@@ -16,6 +16,7 @@ def run() -> None:
     print(f"database backend: {backend}")
     notify.validate_configuration()
     _process_public_subscriptions()
+    db.mark_digest_run_completed()
 
 
 if __name__ == "__main__":

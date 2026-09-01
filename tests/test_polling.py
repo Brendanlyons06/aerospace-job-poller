@@ -49,6 +49,7 @@ job_metadata = importlib.import_module(f"{PACKAGE}.job_metadata")
 imc = importlib.import_module(f"{PACKAGE}.companies.imc")
 meta_client = importlib.import_module(f"{PACKAGE}.companies.metacareers.client")
 notify = importlib.import_module(f"{PACKAGE}.notify")
+poll_if_stale = importlib.import_module(f"{PACKAGE}.poll_if_stale")
 profiles = importlib.import_module(f"{PACKAGE}.profiles")
 rippling = importlib.import_module(f"{PACKAGE}.companies.rippling")
 rippling_client = importlib.import_module(f"{PACKAGE}.companies.rippling.client")
@@ -1063,13 +1064,34 @@ class DatabaseDiffTests(unittest.TestCase):
             patch.object(send_due_digests.db, "validate_configuration", return_value="postgres"),
             patch.object(send_due_digests.notify, "validate_configuration") as validate_notify,
             patch.object(send_due_digests, "_process_public_subscriptions") as process,
+            patch.object(send_due_digests.db, "mark_digest_run_completed") as mark_completed,
             patch("builtins.print") as print_message,
         ):
             send_due_digests.run()
 
         validate_notify.assert_called_once_with()
         process.assert_called_once_with()
+        mark_completed.assert_called_once_with()
         print_message.assert_called_once_with("database backend: postgres")
+
+    def test_stale_poll_detection_uses_last_completed_timestamp(self) -> None:
+        now = datetime(2026, 8, 31, 20, 0, tzinfo=timezone.utc)
+        db.mark_poll_completed(now=now - timedelta(minutes=119))
+        self.assertFalse(db.poll_is_stale(now=now))
+        self.assertTrue(db.poll_is_stale(now=now + timedelta(minutes=2)))
+
+    def test_recovery_runner_only_polls_when_stale(self) -> None:
+        with (
+            patch.object(poll_if_stale.db, "validate_configuration", return_value="postgres"),
+            patch.object(poll_if_stale.db, "poll_is_stale", side_effect=[False, True]),
+            patch.object(poll_if_stale.watch, "run") as run_poll,
+            patch.dict("os.environ", {"JOB_POLLER_STALE_AFTER_MINUTES": "120"}),
+            patch("builtins.print"),
+        ):
+            poll_if_stale.run()
+            run_poll.assert_not_called()
+            poll_if_stale.run()
+            run_poll.assert_called_once_with()
 
     def test_daily_digest_workflow_has_redundant_pacific_windows(self) -> None:
         workflow = (
@@ -1362,6 +1384,15 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("manage_requested_at", management_migration)
         self.assertIn("p_states TEXT[]", management_migration)
         self.assertNotIn("GRANT SELECT ON public.email_subscriptions", management_migration)
+        reliability_migration = (
+            PROJECT_ROOT / "supabase" / "migrations" / "010_reliability_and_owner_status.sql"
+        ).read_text()
+        self.assertIn("CREATE VIEW public.dashboard_owner_status", reliability_migration)
+        self.assertIn("last_digest_completed_at", reliability_migration)
+        self.assertIn("active_subscriber_count", reliability_migration)
+        self.assertNotIn("verification_token", reliability_migration)
+        self.assertNotIn("unsubscribe_token", reliability_migration)
+        self.assertNotIn("last_error", reliability_migration)
 
     def test_cloud_workflow_requires_explicit_schedule_enablement(self) -> None:
         workflow = (
@@ -1373,6 +1404,31 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertIn("default: test-notification", workflow)
         self.assertIn("actions/checkout@v6", workflow)
         self.assertIn("actions/setup-python@v6", workflow)
+
+    def test_recovery_workflow_is_staggered_and_shares_poll_concurrency(self) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "poll-watchdog.yml"
+        ).read_text()
+        self.assertIn('cron: "7,37 * * * *"', workflow)
+        self.assertIn("group: aerospace-job-poller", workflow)
+        self.assertIn("JOB_POLLER_STALE_AFTER_MINUTES: \"120\"", workflow)
+        self.assertIn("python -m job-poller.poll_if_stale", workflow)
+        self.assertIn("vars.POLLER_ENABLED == 'true'", workflow)
+
+    def test_owner_dashboard_uses_site_identity_and_aggregate_data_only(self) -> None:
+        owner_page = (
+            PROJECT_ROOT / "dashboard" / "app" / "owner" / "page.tsx"
+        ).read_text()
+        owner_data = (
+            PROJECT_ROOT / "dashboard" / "lib" / "owner.ts"
+        ).read_text()
+        self.assertIn("oai-authenticated-user-id", owner_page)
+        self.assertIn("AEROSCOUT_OWNER_USER_ID", owner_page)
+        self.assertIn("/signin-with-chatgpt?return_to=%2Fowner", owner_page)
+        self.assertIn("hourly-poller.yml", owner_page)
+        self.assertIn("daily-digest.yml", owner_page)
+        self.assertIn("dashboard_owner_status", owner_data)
+        self.assertNotIn("SUPABASE_SERVICE_ROLE", owner_data)
 
     def test_dashboard_subscription_and_navigation_regressions(self) -> None:
         form = (PROJECT_ROOT / "dashboard" / "app" / "subscription-form.tsx").read_text()
