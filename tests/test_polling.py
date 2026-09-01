@@ -10,6 +10,7 @@ poller's failure isolation.
 from __future__ import annotations
 
 import importlib
+import html
 import json
 import re
 import sqlite3
@@ -387,6 +388,67 @@ class FeedNormalizationTests(unittest.TestCase):
             jobs = feeds.official_page_jobs("https://careers.example/openings", r"/jobs/(\d+)")
         self.assertEqual(jobs, [job("123", "Software Intern") | {"locations": [], "url": "https://careers.example/jobs/123"}])
 
+    def test_brassring_reads_the_employer_internship_site_and_department(self) -> None:
+        def question(name: str, value: str, actual: str | None = None) -> dict:
+            return {
+                "QuestionName": name,
+                "Value": value,
+                "ActualValueFromSolar": actual if actual is not None else value,
+            }
+
+        payload = {
+            "HotJobs": {
+                "Job": [
+                    {
+                        "Questions": [
+                            question("reqid", "123"),
+                            question("formtext8", "Systems Engineering Intern"),
+                            question("department", "General Atomics Aeronautical Systems"),
+                            question("formtext5", "Poway"),
+                            question("formtext4", "California"),
+                            question("lastupdated", "27-Aug-2026", "2026-08-27T00:00:00Z"),
+                        ],
+                        "Link": "https://sjobs.brassring.com/job/123",
+                    },
+                    {
+                        "Questions": [
+                            question("reqid", "456"),
+                            question("formtext8", "Legal Intern"),
+                            question("department", "General Atomics"),
+                        ],
+                        "Link": "https://sjobs.brassring.com/job/456",
+                    },
+                ]
+            }
+        }
+        page = f'<input id="searchResults" type="hidden" value="{html.escape(json.dumps(payload), quote=True)}">'
+        session = FakeSession(get_responses=[FakeResponse(text=page)])
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.brassring_internships_us(
+                "25539",
+                "5310",
+                department_contains="General Atomics Aeronautical Systems",
+                title_filter=filters.is_aerospace_mechanical_title,
+            )
+        self.assertEqual(
+            jobs,
+            [{
+                "id": "123",
+                "title": "Systems Engineering Intern",
+                "locations": ["Poway, California"],
+                "url": "https://sjobs.brassring.com/job/123",
+                "posted_at": "2026-08-27T00:00:00Z",
+                "employment_type": "internship",
+                "location_details": [{
+                    "label": "Poway, California",
+                    "city": "Poway",
+                    "state": "California",
+                    "country": "US",
+                }],
+            }],
+        )
+        self.assertEqual(session.get_calls[0][1]["params"], {"partnerid": "25539", "siteid": "5310"})
+
     def test_pinpoint_uses_structured_us_location_and_source_metadata(self) -> None:
         payload = {
             "data": [
@@ -663,13 +725,13 @@ class MetaClientTests(unittest.TestCase):
 
 
 class AdapterContractTests(unittest.TestCase):
-    def test_phase_three_workflow_enables_the_50_adapter_manifest(self) -> None:
+    def test_phase_three_workflow_enables_the_51_adapter_manifest(self) -> None:
         workflow = (PROJECT_ROOT / ".github/workflows/hourly-poller.yml").read_text()
         match = re.search(r"^\s*JOB_POLLER_COMPANIES:\s*(\S+)$", workflow, re.MULTILINE)
         self.assertIsNotNone(match)
         slugs = match.group(1).split(",")
-        self.assertEqual(len(slugs), 50)
-        self.assertEqual(len(set(slugs)), 50)
+        self.assertEqual(len(slugs), 51)
+        self.assertEqual(len(set(slugs)), 51)
         enabled_names = {
             importlib.import_module(f"{PACKAGE}.companies.{slug}").COMPANY_NAME
             for slug in slugs

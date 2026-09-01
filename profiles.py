@@ -136,6 +136,7 @@ AEROSPACE_ADAPTER_COMPANIES = frozenset(
         "Northrop Grumman",
         "RTX",
         "GE Aerospace",
+        "General Atomics Aeronautical Systems",
         "BAE Systems",
         "Leidos",
         "Anduril Industries",

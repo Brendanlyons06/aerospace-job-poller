@@ -20,7 +20,7 @@ this version.
 - Supports self-service, verified daily or weekly email digests for a free
   beta capped at 100 active subscribers.
 - Supports optional Twilio SMS alerts, disabled by default.
-- Has 50 enabled aerospace-profile adapters using official career sources.
+- Has 51 enabled aerospace-profile adapters using official career sources.
 - Stores dashboard-ready sectors, disciplines, lifecycle dates, structured
   locations, work modes, and source-published compensation/date metadata.
 - Passes deterministic tests and live two-pass adapter validation.
@@ -48,6 +48,7 @@ The enabled set includes:
 - Northwood Space, Axiom Space, Loft Orbital, Wisk Aero, and Boom Supersonic
 - Sierra Nevada Corporation, Moog, Curtiss-Wright, and Applied Materials
 - ispace, Apple Hardware Engineering, Caterpillar, Astrolab, and Starpath
+- General Atomics Aeronautical Systems
 
 The complete target manifest is maintained in [`profiles.py`](profiles.py).
 
@@ -177,7 +178,7 @@ adapter contract.
 
 ## Free cloud schedule
 
-The checked-in GitHub Actions workflow runs all 50 enabled sources hourly at
+The checked-in GitHub Actions workflow runs all 51 enabled sources hourly at
 17 minutes past the hour. It uses Supabase PostgreSQL for durable state and
 refuses to poll if the database secret is missing, preventing accidental use
 of a temporary runner-local database.

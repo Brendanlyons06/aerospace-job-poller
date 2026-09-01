@@ -50,6 +50,10 @@ function ageLabel(value: string, referenceTime: number) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(value));
 }
 
+function prefixedAgeLabel(prefix: string, value: string, referenceTime: number) {
+  return `${prefix} ${ageLabel(value, referenceTime).toLowerCase()}`;
+}
+
 function closingLabel(value: string | null, referenceTime: number) {
   if (!value) return null;
   const date = new Date(value);
@@ -147,7 +151,8 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
     const maxAge = freshness === 'all' ? null : Number(freshness) * 86_400_000;
     const filtered = jobs.filter((job) => {
       const searchable = [job.title, job.company, job.fullLocation, label(job.discipline), label(job.sector), label(job.workMode)].filter(Boolean).join(' ').toLowerCase();
-      const discoveredAge = referenceTime - timestamp(job.firstSeen);
+      const discoveredAt = timestamp(job.firstSeen);
+      const discoveredAge = referenceTime - discoveredAt;
       const inRadius = !position || job.locationCoordinates.some((coordinates) => distanceMiles(position, coordinates) <= radius);
       const inSelectedLocation = selectedStates.length === 0 || selectedStates.some((selected) => (
         selected === 'REMOTE' ? job.workMode === 'remote' : job.locationStates.includes(selected)
@@ -157,7 +162,7 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
         && (company === 'all' || job.company === company)
         && (workMode === 'all' || job.workMode === workMode)
         && inSelectedLocation
-        && (maxAge === null || discoveredAge <= maxAge)
+        && (maxAge === null || (discoveredAt > 0 && discoveredAge >= 0 && discoveredAge <= maxAge))
         && (!savedOnly || savedJobs.has(jobKey(job)))
         && inRadius
         && (!needle || searchable.includes(needle));
@@ -213,7 +218,6 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
     <>
       <div className="section-heading">
         <div><p className="eyebrow dark">Internship finder</p><h2>Current opportunities</h2></div>
-        <span className="result-count">{filteredJobs.length} {filteredJobs.length === 1 ? 'role' : 'roles'} shown</span>
       </div>
 
       <SubscriptionForm
@@ -269,19 +273,30 @@ export default function JobsTable({ jobs, sources, notice, isLive, sourceCount, 
         {geoMessage && <small role="status">{geoMessage}</small>}
       </div>
 
+      <div className="results-bar" aria-live="polite">
+        <span className="result-count">{filteredJobs.length} matching {filteredJobs.length === 1 ? 'role' : 'roles'}</span>
+      </div>
+
       <div className="table-wrap">
         <table>
           <thead><tr><th>Company &amp; position</th><th>Discipline</th><th>Location</th><th>Work mode</th><th>Timing</th><th><span className="sr-only">Apply</span></th></tr></thead>
           <tbody>
             {visibleJobs.map((job) => {
               const closes = closingLabel(job.closesAt, referenceTime);
+              const postedDiffersFromDiscovery = Boolean(
+                job.postedAt && Math.abs(timestamp(job.firstSeen) - timestamp(job.postedAt)) >= 86_400_000,
+              );
               return (
                 <tr key={`${job.company}-${job.jobId}`}>
                   <td><button className={`save-job ${savedJobs.has(jobKey(job)) ? 'saved' : ''}`} type="button" onClick={() => toggleSaved(job)} aria-label={`${savedJobs.has(jobKey(job)) ? 'Remove' : 'Save'} ${job.title}`}>★</button><span className="company-mark">{job.company.slice(0, 2).toUpperCase()}</span><span><strong>{job.title}</strong><small>{job.company} · {label(job.sector)}</small></span></td>
                   <td><span className="tag">{label(job.discipline, 'Engineering')}</span></td>
                   <td className="location-cell"><span title={job.fullLocation}>{job.location}</span></td>
                   <td><span className="mode-label">{label(job.workMode, 'Not listed')}</span></td>
-                  <td className="timing-cell"><span>{ageLabel(job.postedAt || job.firstSeen, referenceTime)}</span>{closes && <small className={closes === 'Deadline passed' ? 'deadline-passed' : ''}>{closes}</small>}</td>
+                  <td className="timing-cell">
+                    <span>{prefixedAgeLabel('Found', job.firstSeen, referenceTime)}</span>
+                    {postedDiffersFromDiscovery && job.postedAt && <small className="posted-age">{prefixedAgeLabel('Posted', job.postedAt, referenceTime)}</small>}
+                    {closes && <small className={closes === 'Deadline passed' ? 'deadline-passed' : ''}>{closes}</small>}
+                  </td>
                   <td>{job.url ? <a className="arrow" href={job.url} target="_blank" rel="noreferrer" aria-label={`Apply for ${job.title} at ${job.company}`}>↗</a> : <span className="arrow disabled" aria-hidden="true">↗</span>}</td>
                 </tr>
               );

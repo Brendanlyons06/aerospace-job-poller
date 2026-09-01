@@ -95,6 +95,81 @@ def official_page_jobs(
     return jobs
 
 
+def brassring_internships_us(
+    partner_id: str,
+    site_id: str,
+    *,
+    department_contains: str | None = None,
+    title_filter=None,
+) -> list[dict]:
+    """Read an employer's public U.S. internship site on BrassRing.
+
+    BrassRing embeds the current result set as HTML-escaped JSON in the
+    ``searchResults`` input. Employer-specific internship sites avoid a
+    brittle search-form submission and make the source contract explicit.
+    """
+    endpoint = "https://sjobs.brassring.com/TGNewUI/Search/Home/Home"
+    with http.session() as session:
+        response = session.get(
+            endpoint,
+            params={"partnerid": partner_id, "siteid": site_id},
+        )
+        response.raise_for_status()
+        page = response.text
+
+    match = re.search(
+        r'<input\b[^>]*\bid=["\']searchResults["\'][^>]*?\bvalue=["\'](.*?)["\']',
+        page,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        raise ValueError("BrassRing careers page has no searchResults payload")
+    payload = json.loads(html.unescape(match.group(1)))
+    predicate = title_filter or is_swe_ml_title
+    jobs = []
+    for posting in payload.get("HotJobs", {}).get("Job", []):
+        fields = {
+            question.get("QuestionName"): question.get("Value")
+            for question in posting.get("Questions", [])
+        }
+        actual_fields = {
+            question.get("QuestionName"): question.get("ActualValueFromSolar")
+            for question in posting.get("Questions", [])
+        }
+        department = str(fields.get("department") or "").strip()
+        if department_contains and department_contains.lower() not in department.lower():
+            continue
+        title = str(fields.get("formtext8") or fields.get("jobtitle") or "").strip()
+        if not is_internship_title(title) or not predicate(title):
+            continue
+        job_id = fields.get("reqid") or fields.get("autoreq")
+        url = posting.get("Link")
+        if not job_id or not url:
+            continue
+        city = str(fields.get("formtext5") or "").strip()
+        state = str(fields.get("formtext4") or "").strip()
+        location = ", ".join(part for part in (city, state) if part) or "United States"
+        jobs.append(
+            _add_optional(
+                {
+                    "id": str(job_id),
+                    "title": title,
+                    "locations": [location],
+                    "url": url,
+                },
+                posted_at=actual_fields.get("lastupdated"),
+                employment_type="internship",
+                location_details=[{
+                    "label": location,
+                    "city": city or None,
+                    "state": state or None,
+                    "country": "US",
+                }],
+            )
+        )
+    return jobs
+
+
 def _clean_html_text(value: str) -> str:
     """Return the visible text from a small careers-page HTML fragment."""
     return re.sub(
