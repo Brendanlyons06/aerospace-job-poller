@@ -8,6 +8,7 @@ careers sites' own listing feeds.
 import html
 import json
 import re
+from datetime import datetime
 from urllib.parse import unquote, urljoin
 
 from curl_cffi import requests
@@ -167,6 +168,83 @@ def brassring_internships_us(
                 }],
             )
         )
+    return jobs
+
+
+def talentbrew_internships_us(
+    listing_url: str,
+    *,
+    title_filter=None,
+) -> list[dict]:
+    """Read a public internship category on a TalentBrew careers site.
+
+    The category itself is the employer's internship classification, while
+    ``title_filter`` keeps the feed focused on the selected engineering profile.
+    """
+    predicate = title_filter or is_swe_ml_title
+    with http.session() as session:
+        response = session.get(listing_url)
+        response.raise_for_status()
+        pages = [response.text]
+        page_count_match = re.search(r'data-total-pages=["\'](\d+)["\']', pages[0])
+        page_count = int(page_count_match.group(1)) if page_count_match else 1
+        for page_number in range(2, page_count + 1):
+            response = session.get(f"{listing_url.rstrip('/')}/{page_number}")
+            response.raise_for_status()
+            pages.append(response.text)
+
+    jobs = []
+    seen = set()
+    for page in pages:
+        for row in re.finditer(r"<li\b[^>]*>(.*?)</li>", page, re.IGNORECASE | re.DOTALL):
+            body = row.group(1)
+            job_match = re.search(
+                r'<a\b[^>]*\bclass=["\'][^"\']*search-results__job-link[^"\']*["\']'
+                r'[^>]*\bhref=["\'](?P<href>[^"\']+)["\'][^>]*\bdata-job-id=["\'](?P<id>[^"\']+)["\']'
+                r'[^>]*>\s*<span[^>]*search-results__job-title[^>]*>(?P<title>.*?)</span>',
+                body,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if not job_match:
+                continue
+            location_match = re.search(
+                r'<span[^>]*search-results__job-info\s+location[^>]*>(.*?)</span>',
+                body,
+                re.IGNORECASE | re.DOTALL,
+            )
+            location = _clean_html_text(location_match.group(1)) if location_match else ""
+            title = _clean_html_text(job_match.group("title"))
+            job_id = html.unescape(job_match.group("id")).strip()
+            if not job_id or job_id in seen or not location or not is_us_location(location):
+                continue
+            if not predicate(title):
+                continue
+            date_match = re.search(
+                r'<span[^>]*search-results__job-info\s+date[^>]*>(.*?)</span>',
+                body,
+                re.IGNORECASE | re.DOTALL,
+            )
+            posted_at = None
+            if date_match:
+                try:
+                    posted_at = datetime.strptime(
+                        _clean_html_text(date_match.group(1)), "%m/%d/%Y"
+                    ).date().isoformat()
+                except ValueError:
+                    pass
+            seen.add(job_id)
+            jobs.append(
+                _add_optional(
+                    {
+                        "id": job_id,
+                        "title": title,
+                        "locations": [location],
+                        "url": urljoin(listing_url, html.unescape(job_match.group("href"))),
+                    },
+                    posted_at=posted_at,
+                    employment_type="internship",
+                )
+            )
     return jobs
 
 

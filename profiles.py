@@ -133,6 +133,7 @@ AEROSPACE_TARGET_COMPANIES = frozenset(
 # This stays explicit so adapter coverage changes remain reviewable.
 AEROSPACE_ADAPTER_COMPANIES = frozenset(
     {
+        "Boeing",
         "Northrop Grumman",
         "RTX",
         "GE Aerospace",

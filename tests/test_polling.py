@@ -449,6 +449,48 @@ class FeedNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(session.get_calls[0][1]["params"], {"partnerid": "25539", "siteid": "5310"})
 
+    def test_talentbrew_reads_all_pages_and_keeps_us_engineering_internships(self) -> None:
+        first_page = """
+            <section data-total-pages="2"><ul>
+              <li><a class="search-results__job-link" href="/en/job/seattle/quality/185/123" data-job-id="123"><span class="search-results__job-title">Quality Engineering Intern</span></a><span class="search-results__job-info location">Seattle, Washington; and other locations</span><span class="search-results__job-info date">08/03/2026</span></li>
+              <li><a class="search-results__job-link" href="/en/job/london/systems/185/456" data-job-id="456"><span class="search-results__job-title">Systems Engineering Intern</span></a><span class="search-results__job-info location">London, United Kingdom</span><span class="search-results__job-info date">08/04/2026</span></li>
+            </ul></section>
+        """
+        second_page = """
+            <ul>
+              <li><a class="search-results__job-link" href="/en/job/seattle/quality/185/123" data-job-id="123"><span class="search-results__job-title">Quality Engineering Intern</span></a><span class="search-results__job-info location">Seattle, Washington</span><span class="search-results__job-info date">08/03/2026</span></li>
+              <li><a class="search-results__job-link" href="/en/job/everett/systems/185/789" data-job-id="789"><span class="search-results__job-title">Systems Engineering Intern</span></a><span class="search-results__job-info location">Everett, Washington</span><span class="search-results__job-info date">08/04/2026</span></li>
+            </ul>
+        """
+        session = FakeSession(get_responses=[FakeResponse(text=first_page), FakeResponse(text=second_page)])
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.talentbrew_internships_us(
+                "https://jobs.example/en/category/internships/1",
+                title_filter=filters.is_aerospace_mechanical_title,
+            )
+        self.assertEqual(
+            jobs,
+            [
+                {
+                    "id": "123",
+                    "title": "Quality Engineering Intern",
+                    "locations": ["Seattle, Washington; and other locations"],
+                    "url": "https://jobs.example/en/job/seattle/quality/185/123",
+                    "posted_at": "2026-08-03",
+                    "employment_type": "internship",
+                },
+                {
+                    "id": "789",
+                    "title": "Systems Engineering Intern",
+                    "locations": ["Everett, Washington"],
+                    "url": "https://jobs.example/en/job/everett/systems/185/789",
+                    "posted_at": "2026-08-04",
+                    "employment_type": "internship",
+                },
+            ],
+        )
+        self.assertEqual(session.get_calls[1][0], "https://jobs.example/en/category/internships/1/2")
+
     def test_pinpoint_uses_structured_us_location_and_source_metadata(self) -> None:
         payload = {
             "data": [
@@ -725,13 +767,13 @@ class MetaClientTests(unittest.TestCase):
 
 
 class AdapterContractTests(unittest.TestCase):
-    def test_phase_three_workflow_enables_the_51_adapter_manifest(self) -> None:
+    def test_phase_three_workflow_enables_the_52_adapter_manifest(self) -> None:
         workflow = (PROJECT_ROOT / ".github/workflows/hourly-poller.yml").read_text()
         match = re.search(r"^\s*JOB_POLLER_COMPANIES:\s*(\S+)$", workflow, re.MULTILINE)
         self.assertIsNotNone(match)
         slugs = match.group(1).split(",")
-        self.assertEqual(len(slugs), 51)
-        self.assertEqual(len(set(slugs)), 51)
+        self.assertEqual(len(slugs), 52)
+        self.assertEqual(len(set(slugs)), 52)
         enabled_names = {
             importlib.import_module(f"{PACKAGE}.companies.{slug}").COMPANY_NAME
             for slug in slugs
