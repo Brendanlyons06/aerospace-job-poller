@@ -804,13 +804,13 @@ class MetaClientTests(unittest.TestCase):
 
 
 class AdapterContractTests(unittest.TestCase):
-    def test_phase_three_workflow_enables_the_53_adapter_manifest(self) -> None:
+    def test_phase_three_workflow_enables_the_54_adapter_manifest(self) -> None:
         workflow = (PROJECT_ROOT / ".github/workflows/hourly-poller.yml").read_text()
         match = re.search(r"^\s*JOB_POLLER_COMPANIES:\s*(\S+)$", workflow, re.MULTILINE)
         self.assertIsNotNone(match)
         slugs = match.group(1).split(",")
-        self.assertEqual(len(slugs), 53)
-        self.assertEqual(len(set(slugs)), 53)
+        self.assertEqual(len(slugs), 54)
+        self.assertEqual(len(set(slugs)), 54)
         enabled_names = {
             importlib.import_module(f"{PACKAGE}.companies.{slug}").COMPANY_NAME
             for slug in slugs

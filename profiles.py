@@ -134,6 +134,7 @@ AEROSPACE_TARGET_COMPANIES = frozenset(
 AEROSPACE_ADAPTER_COMPANIES = frozenset(
     {
         "Boeing",
+        "Honeywell Aerospace",
         "L3Harris Technologies",
         "Northrop Grumman",
         "RTX",
