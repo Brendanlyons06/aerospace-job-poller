@@ -10,7 +10,7 @@ are introduced only when usage or SMS delivery requires them.
 - Durable job deduplication and notification retries
 - Gmail alerts and optional disabled-by-default SMS support
 - Per-company health monitoring and weekly summaries
-- 52 relevant adapters enabled in the free cloud poller
+- 53 relevant adapters enabled in the free cloud poller
 - Local macOS scheduler and private GitHub repository
 
 ## Phase 1 — free cloud poller
@@ -42,7 +42,7 @@ career-board inconsistencies.
 - Add aircraft, industrial, laboratory, and government sources
 - Prefer 50–60 reliable sources before chasing complete list coverage
 
-The enabled set now contains 52 official sources. It combines the original
+The enabled set now contains 53 official sources. It combines the original
 14-company pilot, the 17 previously inactive aerospace adapters, and 19 new
 adapters across defense, spacecraft, aircraft, and advanced manufacturing.
 New sources are baseline-seeded before they can alert, preventing a backlog

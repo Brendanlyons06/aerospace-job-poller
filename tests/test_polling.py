@@ -491,6 +491,43 @@ class FeedNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(session.get_calls[1][0], "https://jobs.example/en/category/internships/1/2")
 
+    def test_talentbrew_category_reader_keeps_newer_layout_engineering_internships(self) -> None:
+        first_page = """
+            <section data-total-pages="2"><ul>
+              <li><a href="/en/job/waco/mechanical/4832/123" data-job-id="123"><h2>Mechanical Engineer Intern</h2><span class="results-facet job-location">Waco, TX</span></a></li>
+              <li><a href="/en/job/london/systems/4832/456" data-job-id="456"><h2>Systems Engineer Intern</h2><span class="results-facet job-location">London, United Kingdom</span></a></li>
+            </ul></section>
+        """
+        second_page = """
+            <ul><li><a href="/en/job/rochester/systems/4832/789" data-job-id="789"><h2>Systems Engineering Intern</h2><span class="results-facet job-location">Rochester, NY</span></a></li></ul>
+        """
+        session = FakeSession(get_responses=[FakeResponse(text=first_page), FakeResponse(text=second_page)])
+        with patch.object(feeds.http, "session", return_value=session):
+            jobs = feeds.talentbrew_category_internships_us(
+                "https://careers.example/en/employment/internships/1",
+                title_filter=filters.is_aerospace_mechanical_title,
+            )
+        self.assertEqual(
+            jobs,
+            [
+                {
+                    "id": "123",
+                    "title": "Mechanical Engineer Intern",
+                    "locations": ["Waco, TX"],
+                    "url": "https://careers.example/en/job/waco/mechanical/4832/123",
+                    "employment_type": "internship",
+                },
+                {
+                    "id": "789",
+                    "title": "Systems Engineering Intern",
+                    "locations": ["Rochester, NY"],
+                    "url": "https://careers.example/en/job/rochester/systems/4832/789",
+                    "employment_type": "internship",
+                },
+            ],
+        )
+        self.assertEqual(session.get_calls[1][0], "https://careers.example/en/employment/internships/1/2")
+
     def test_pinpoint_uses_structured_us_location_and_source_metadata(self) -> None:
         payload = {
             "data": [
@@ -767,13 +804,13 @@ class MetaClientTests(unittest.TestCase):
 
 
 class AdapterContractTests(unittest.TestCase):
-    def test_phase_three_workflow_enables_the_52_adapter_manifest(self) -> None:
+    def test_phase_three_workflow_enables_the_53_adapter_manifest(self) -> None:
         workflow = (PROJECT_ROOT / ".github/workflows/hourly-poller.yml").read_text()
         match = re.search(r"^\s*JOB_POLLER_COMPANIES:\s*(\S+)$", workflow, re.MULTILINE)
         self.assertIsNotNone(match)
         slugs = match.group(1).split(",")
-        self.assertEqual(len(slugs), 52)
-        self.assertEqual(len(set(slugs)), 52)
+        self.assertEqual(len(slugs), 53)
+        self.assertEqual(len(set(slugs)), 53)
         enabled_names = {
             importlib.import_module(f"{PACKAGE}.companies.{slug}").COMPANY_NAME
             for slug in slugs

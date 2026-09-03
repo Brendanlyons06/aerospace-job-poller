@@ -248,6 +248,71 @@ def talentbrew_internships_us(
     return jobs
 
 
+def talentbrew_category_internships_us(
+    listing_url: str,
+    *,
+    title_filter=None,
+) -> list[dict]:
+    """Read a paginated TalentBrew internship category with the standard layout.
+
+    Some TalentBrew employers use the newer result markup instead of the
+    Boeing-specific ``search-results__job-link`` classes.  The category still
+    supplies the employer's internship classification; this reader retains
+    only relevant U.S. engineering titles and uses the employer's requisition
+    ID as the durable identifier.
+    """
+    predicate = title_filter or is_swe_ml_title
+    with http.session() as session:
+        response = session.get(listing_url)
+        response.raise_for_status()
+        pages = [response.text]
+        page_count_match = re.search(r'data-total-pages=["\'](\d+)["\']', pages[0])
+        page_count = int(page_count_match.group(1)) if page_count_match else 1
+        for page_number in range(2, page_count + 1):
+            response = session.get(f"{listing_url.rstrip('/')}/{page_number}")
+            response.raise_for_status()
+            pages.append(response.text)
+
+    jobs = []
+    seen = set()
+    for page in pages:
+        for row in re.finditer(r"<li\b[^>]*>(.*?)</li>", page, re.IGNORECASE | re.DOTALL):
+            body = row.group(1)
+            job_match = re.search(
+                r'<a\b[^>]*\bhref=["\'](?P<href>[^"\']+)["\'][^>]*\bdata-job-id=["\'](?P<id>[^"\']+)["\'][^>]*>'
+                r'\s*<h2[^>]*>(?P<title>.*?)</h2>',
+                body,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if not job_match:
+                continue
+            location_match = re.search(
+                r'<span[^>]*\bjob-location\b[^>]*>(?P<location>.*?)</span>',
+                body,
+                re.IGNORECASE | re.DOTALL,
+            )
+            title = _clean_html_text(job_match.group("title"))
+            location = _clean_html_text(location_match.group("location")) if location_match else ""
+            job_id = html.unescape(job_match.group("id")).strip()
+            if not job_id or job_id in seen or not location or not is_us_location(location):
+                continue
+            if not predicate(title):
+                continue
+            seen.add(job_id)
+            jobs.append(
+                _add_optional(
+                    {
+                        "id": job_id,
+                        "title": title,
+                        "locations": [location],
+                        "url": urljoin(listing_url, html.unescape(job_match.group("href"))),
+                    },
+                    employment_type="internship",
+                )
+            )
+    return jobs
+
+
 def _clean_html_text(value: str) -> str:
     """Return the visible text from a small careers-page HTML fragment."""
     return re.sub(

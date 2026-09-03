@@ -48,7 +48,7 @@ AEROSPACE_MECHANICAL_RE = re.compile(
     r"\bflight\s+(?:sciences?|controls?|test|dynamics?)\b|"
     r"\bgnc\b|\bguidance[\s,/-]+navigation(?:[\s,/-]+control)?\b|"
     r"\baerodynamics?\b|\baircraft\s+performance\b|"
-    r"\bvehicle\s+engineering\b|\bstructures?\s+engineering\b|"
+    r"\bvehicle\s+engineering\b|\bstructures?\s+engineering\b|\bstructural\s+engineer(?:ing)?\b|"
     r"\bpropulsion\b|\bthermal\b|"
     r"\bsystems?\s+(?:engineering|integration(?:\s*&?\s*test)?|test)\b|"
     r"\bproject\s+engineering\b|\bmanufacturing\s+engineering\b|"

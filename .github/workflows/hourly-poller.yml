@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 20
     env:
       JOB_POLLER_PROFILE: aerospace
-      JOB_POLLER_COMPANIES: spacex,blueorigin,boeing,northropgrumman,geaerospace,generalatomics,rocketlab,relativityspace,fireflyaerospace,impulsespace,trueanomaly,apexspace,vastspace,aerovironment,jobyaviation,betatechnologies,rtx,baesystems,leidos,anduril,shieldai,stokespace,varda,k2space,aerospacecorp,zipline,astranis,epirus,caci,machindustries,skydio,hadrian,saronic,planetlabs,archeraviation,muonspace,machinalabs,gravitics,northwoodspace,axiomspace,loftorbital,wiskaero,boomsupersonic,sierranevada,moog,curtisswright,appliedmaterials,ispace,apple,caterpillar,astrolab,starpath
+      JOB_POLLER_COMPANIES: spacex,blueorigin,boeing,l3harris,northropgrumman,geaerospace,generalatomics,rocketlab,relativityspace,fireflyaerospace,impulsespace,trueanomaly,apexspace,vastspace,aerovironment,jobyaviation,betatechnologies,rtx,baesystems,leidos,anduril,shieldai,stokespace,varda,k2space,aerospacecorp,zipline,astranis,epirus,caci,machindustries,skydio,hadrian,saronic,planetlabs,archeraviation,muonspace,machinalabs,gravitics,northwoodspace,axiomspace,loftorbital,wiskaero,boomsupersonic,sierranevada,moog,curtisswright,appliedmaterials,ispace,apple,caterpillar,astrolab,starpath
       JOB_POLLER_REQUIRE_POSTGRES: "true"
       JOB_POLLER_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
       EMAIL_ALERTS_ENABLED: "true"
