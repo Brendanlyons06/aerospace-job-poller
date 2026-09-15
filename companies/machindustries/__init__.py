@@ -1,12 +1,15 @@
 from ...filters import is_internship_title, is_us_job
-from ..feeds import ashby_jobs
+from ..feeds import greenhouse_jobs
 
 COMPANY_NAME = "Mach Industries"
-CAREERS_URL = "https://jobs.ashbyhq.com/mach"
+CAREERS_URL = "https://machindustries.com/careers"
 
 
 def fetch_jobs() -> list[dict]:
-    return ashby_jobs("mach")
+    # Mach moved its public board from Ashby to Greenhouse in September 2026.
+    # The old Ashby posting API now returns HTTP 404, while the official
+    # careers page links to this Greenhouse board.
+    return greenhouse_jobs("machindustries")
 
 
 def filter_jobs(jobs: list[dict]) -> list[dict]:

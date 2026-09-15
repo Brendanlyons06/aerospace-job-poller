@@ -48,6 +48,7 @@ feeds = importlib.import_module(f"{PACKAGE}.companies.feeds")
 filters = importlib.import_module(f"{PACKAGE}.filters")
 job_metadata = importlib.import_module(f"{PACKAGE}.job_metadata")
 imc = importlib.import_module(f"{PACKAGE}.companies.imc")
+machindustries = importlib.import_module(f"{PACKAGE}.companies.machindustries")
 meta_client = importlib.import_module(f"{PACKAGE}.companies.metacareers.client")
 notify = importlib.import_module(f"{PACKAGE}.notify")
 poll_if_stale = importlib.import_module(f"{PACKAGE}.poll_if_stale")
@@ -102,6 +103,20 @@ class FakeSession:
 
 
 class FeedNormalizationTests(unittest.TestCase):
+    def test_mach_uses_its_current_greenhouse_board(self) -> None:
+        jobs = [
+            {
+                "id": "mach-1",
+                "title": "Spring 2027 Engineering Internship",
+                "locations": ["Huntington Beach, California, United States"],
+                "url": "https://job-boards.greenhouse.io/machindustries/jobs/1",
+            }
+        ]
+        with patch.object(machindustries, "greenhouse_jobs", return_value=jobs) as fetch:
+            self.assertEqual(machindustries.fetch_jobs(), jobs)
+        fetch.assert_called_once_with("machindustries")
+        self.assertEqual(machindustries.filter_jobs(jobs), jobs)
+
     def test_imc_rejects_foreign_greenhouse_results(self) -> None:
         payload = {
             "jobs": [
