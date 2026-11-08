@@ -1,0 +1,41 @@
+name: AeroScout Schedule Keepalive
+
+on:
+  schedule:
+    - cron: "43 3 * * 1,4"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aeroscout-schedule-keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    if: vars.POLLER_ENABLED == 'true' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Record activity if the repository has been quiet for 45 days
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          last_commit=$(git log -1 --format=%ct)
+          now=$(date -u +%s)
+          if (( now - last_commit < 45 * 24 * 60 * 60 )); then
+            echo "Default branch activity is less than 45 days old."
+            exit 0
+          fi
+
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --allow-empty -m "chore: keep AeroScout schedules active"
+          git push origin "HEAD:refs/heads/$DEFAULT_BRANCH"
