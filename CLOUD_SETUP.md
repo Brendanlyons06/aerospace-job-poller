@@ -92,3 +92,18 @@ continuous virtual machine.
   three consecutive failures.
 - **Test email works but polling fails:** inspect the database line first; the
   workflow refuses to fall back to temporary SQLite storage.
+
+### Keep scheduled workflows active
+
+GitHub pauses scheduled workflows in inactive public repositories after 60
+days. While `POLLER_ENABLED` is `true`, **AeroScout Schedule Keepalive**
+checks the default branch twice a week and pushes an empty maintenance commit
+once the latest commit is at least 45 days old. It uses the built-in GitHub
+token with repository contents write access. The default branch must allow
+that token to push a regular fast-forward commit.
+
+If a workflow pauses, open **Actions**, select it, and click **Enable
+workflow**. Check the next successful scheduled run of the hourly poller,
+recovery watchdog, and daily subscriber digest. If the keepalive has also
+paused, re-enable it and use **Run workflow** on the default branch to check
+for stale activity without running the poller or sending a digest.
