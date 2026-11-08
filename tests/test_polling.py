@@ -1682,6 +1682,48 @@ class PollerTests(unittest.TestCase):
             watch.run()
         sync.assert_called_once_with("Good", [job("good")])
 
+    def test_failed_fetch_preserves_pending_closure_until_next_successful_miss(self) -> None:
+        class Company(SimpleNamespace):
+            __hash__ = object.__hash__
+
+        company = Company(
+            COMPANY_NAME="Example",
+            fetch_jobs=Mock(side_effect=[[job("1")], [], RuntimeError("board down"), []]),
+        )
+        expected_states = (
+            ("initial listing", 0, False),
+            ("first successful miss", 1, False),
+            ("failed fetch", 1, False),
+            ("second successful miss", 2, True),
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.dict("os.environ", {
+                "JOB_POLLER_DATABASE_URL": "",
+                "JOB_POLLER_REQUIRE_POSTGRES": "",
+            }),
+            patch.object(db, "DB_PATH", Path(temp_dir) / "jobs.db"),
+            patch.object(watch, "LOCK_PATH", Path(temp_dir) / ".job-poller.lock"),
+            patch.object(watch, "COMPANIES", [company]),
+            patch.object(watch.notify, "validate_configuration"),
+            patch.object(watch.notify, "ensure_opted_in"),
+            patch.object(watch.notify, "notify_new_job"),
+            patch.object(watch, "_send_health_message"),
+            patch.object(watch, "_process_public_subscriptions"),
+        ):
+            for phase, expected_misses, expected_closed in expected_states:
+                with self.subTest(phase=phase):
+                    watch.run()
+                    with db._connection() as connection:
+                        missed_polls, closed_at = connection.execute(
+                            "SELECT missed_polls, closed_at FROM jobs "
+                            "WHERE company = ? AND job_id = ?",
+                            ("Example", "1"),
+                        ).fetchone()
+                    self.assertEqual(missed_polls, expected_misses)
+                    self.assertEqual(closed_at is not None, expected_closed)
+
     def test_run_notifies_only_job_added_after_initial_poll(self) -> None:
         class Company(SimpleNamespace):
             __hash__ = object.__hash__
