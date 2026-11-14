@@ -25,6 +25,8 @@ from . import observability
 # released. Keep the product of these in mind if you raise either.
 DEFAULT_TIMEOUT = (5, 15)
 RETRIES = 2
+# Cloudflare returns 521 when it cannot connect to the upstream server.
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504, 521}
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -52,7 +54,7 @@ class _TimeoutSession(requests.Session):
             started = time.monotonic()
             try:
                 response = super().request(*args, **kwargs)
-                retryable = response.status_code in {429, 500, 502, 503, 504}
+                retryable = response.status_code in RETRYABLE_STATUS_CODES
                 observability.log_event(
                     event="http_request",
                     method=method,
